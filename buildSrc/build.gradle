@@ -1,0 +1,30 @@
+// Apply this repo's plugin to itself without a published artifact
+plugins {
+    id 'java-gradle-plugin'
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+}
+
+sourceSets {
+    main {
+        java {
+            srcDir '../src/main/java'
+            srcDir '../plugin/src/main/java'
+        }
+    }
+}
+
+gradlePlugin {
+    plugins {
+        versioning {
+            id = 'com.cleanroommc.versioning'
+            implementationClass = 'com.cleanroommc.versioning.gradle.CleanroomVersioningPlugin'
+        }
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}

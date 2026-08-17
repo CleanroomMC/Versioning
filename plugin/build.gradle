@@ -1,0 +1,108 @@
+plugins {
+    id 'com.cleanroommc.versioning'
+    id 'java-gradle-plugin'
+    id 'maven-publish'
+    id 'com.gradle.plugin-publish' version '2.1.1'
+    id 'signing'
+}
+
+group = rootProject.group
+base.archivesName = 'versioning-gradle'
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(21)
+    withSourcesJar()
+    withJavadocJar()
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation rootProject
+
+    testImplementation gradleTestKit()
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+gradlePlugin {
+    website = 'https://github.com/CleanroomMC/Versioning'
+    vcsUrl = 'https://github.com/CleanroomMC/Versioning.git'
+    plugins {
+        versioning {
+            id = 'com.cleanroommc.versioning'
+            implementationClass = 'com.cleanroommc.versioning.gradle.CleanroomVersioningPlugin'
+            displayName = 'Cleanroom Versioning'
+            description = 'Sets project.version from a declared version, stage, and git describe.'
+            tags.set(['version', 'semver', 'git', 'versioning'])
+            compatibility {
+                features {
+                    configurationCache = true
+                }
+            }
+        }
+    }
+}
+
+tasks.named('test', Test) {
+    useJUnitPlatform()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+tasks.named('jar', Jar) {
+    from(rootProject.sourceSets.main.output)
+}
+
+tasks.named('sourcesJar', Jar) {
+    from(rootProject.sourceSets.main.allJava)
+}
+
+tasks.withType(GenerateModuleMetadata).configureEach {
+    enabled = false
+}
+
+publishing {
+    publications {
+        pluginMaven(MavenPublication) {
+            artifactId = 'versioning-gradle'
+        }
+    }
+    publications.withType(MavenPublication).configureEach { publication ->
+        publication.pom.withXml {
+            def dependenciesNode = asNode().dependencies
+            if (dependenciesNode != null) {
+                dependenciesNode.dependency
+                        .findAll { it.artifactId.text() == 'versioning' }
+                        .each { it.parent().remove(it) }
+            }
+        }
+    }
+    repositories {
+        maven {
+            name = 'CleanroomMaven'
+            url = 'https://maven.cleanroommc.com'
+            credentials(PasswordCredentials)
+            authentication {
+                basic(BasicAuthentication)
+            }
+        }
+    }
+}
+
+def signingKey = providers.gradleProperty('signingKey')
+def signingPassword = providers.gradleProperty('signingPassword')
+
+signing {
+    required = {
+        gradle.taskGraph.allTasks.any { it.name == 'publishPlugins' }
+    }
+    if (signingKey.present && signingPassword.present) {
+        useInMemoryPgpKeys(signingKey.get(), signingPassword.get())
+    }
+}
