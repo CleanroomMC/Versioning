@@ -70,7 +70,7 @@ class VersioningTest {
     @Test
     void releaseRejectsUnparseableDescribe() {
         var ex = assertThrows(VersioningException.class, () -> Versioning.compute("0.6.10", "alpha", "f5e9227e", true, null));
-        assertEquals("Git tag '' does not match gradle.properties version '0.6.10-alpha'", ex.getMessage());
+        assertEquals("No git tag found; expected '0.6.10-alpha' (git describe did not return <tag>-<n>-g<hash>; fetch tags in CI)", ex.getMessage());
     }
 
     @ParameterizedTest

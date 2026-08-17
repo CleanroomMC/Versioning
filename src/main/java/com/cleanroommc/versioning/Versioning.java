@@ -53,6 +53,9 @@ public final class Versioning {
         String base = request.baseVersion();
         GitDescribe git = request.git();
         if (request.publish()) {
+            if (git.isMissing()) {
+                throw new VersioningException("No git tag found; expected '" + base + "' (git describe did not return <tag>-<n>-g<hash>; fetch tags in CI)");
+            }
             if (!git.tag().equals(base)) {
                 throw new VersioningException("Git tag '" + git.tag() + "' does not match gradle.properties version '" + base + "'");
             }
