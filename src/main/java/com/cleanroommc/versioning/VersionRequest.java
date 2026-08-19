@@ -55,10 +55,10 @@ public final class VersionRequest {
     }
 
     /**
-     * Version with stage applied and no build metadata: {@code 0.6.10} or {@code 0.6.10-alpha}.
+     * Version without build metadata, and the git tag required to publish: {@code 0.6.10}.
      */
     public String baseVersion() {
-        return this.stage.isRelease() ? this.numericVersion : this.numericVersion + "-" + this.stage.id();
+        return this.numericVersion;
     }
 
     @Override

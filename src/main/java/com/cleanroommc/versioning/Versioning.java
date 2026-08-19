@@ -6,16 +6,11 @@ package com.cleanroommc.versioning;
  *
  * <p>Three modes, in precedence order:
  * <ol>
- *     <li><b>Publish</b> ({@code publish} is {@code true}): the base version verbatim, e.g. {@code 0.6.10-alpha}.
- *     Requires the nearest tag to equal the base version at distance {@code 0}.</li>
- *     <li><b>CI</b> ({@code run} is non-{@code null}): base version plus {@code +build.<distance>.run.<run>}.</li>
- *     <li><b>Local</b> (neither): base version plus {@code +local.<distance>}.</li>
+ *     <li><b>Publish</b> ({@code publish} is {@code true}): the numeric version verbatim, e.g. {@code 0.6.10}.
+ *     Requires the nearest tag to equal that version at distance {@code 0}.</li>
+ *     <li><b>CI</b> ({@code run} is non-{@code null}): numeric version plus {@code +build.<distance>.run.<run>}.</li>
+ *     <li><b>Local</b> (neither): numeric version plus {@code +local.<distance>}.</li>
  * </ol>
- *
- * <p>The base version carries the stage as a SemVer prerelease identifier
- * ({@code 0.6.10-alpha}), except for {@link Stage#RELEASE}, which uses the numeric version as-is ({@code 0.6.10}).
- * Note that the stage is independent of the publish flag:
- * an {@code alpha} can be published, and a {@code release} stage can be built locally.
  */
 public final class Versioning {
 
@@ -25,9 +20,9 @@ public final class Versioning {
      * @param numeric     declared numeric version, e.g. {@code 0.6.10}
      * @param stage       stage id, one of {@code alpha}, {@code beta}, {@code rc}, {@code release}
      * @param gitDescribe raw {@code git describe --tags --long --always} output, e.g.
-     *                    {@code 0.6.10-alpha-48-gf5e9227e}; unparseable or {@code null} input
+     *                    {@code 0.6.10-48-gf5e9227e}; unparseable or {@code null} input
      *                    is treated as no tag at distance {@code 0}
-     * @param publish     {@code true} to emit the base version and validate tag and distance
+     * @param publish     {@code true} to emit the numeric version and validate tag and distance
      * @param run         CI run identifier, or {@code null} for a local build
      * @return the computed version
      * @throws VersioningException if an argument is invalid, or if {@code publish} is {@code true}

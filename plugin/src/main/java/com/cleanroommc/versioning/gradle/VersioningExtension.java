@@ -33,6 +33,10 @@ public abstract class VersioningExtension {
         return this.computed.stage().id();
     }
 
+    public String getArtifactSuffix() {
+        return this.computed.artifactSuffix();
+    }
+
     public GitDescribe getGit() {
         return this.computed.git();
     }

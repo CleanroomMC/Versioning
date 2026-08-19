@@ -39,10 +39,12 @@ class CleanroomVersioningPluginTest {
                 tasks.register('printComputed') {
                     def version = project.version.toString()
                     def base = versioning.baseVersion
+                    def suffix = versioning.artifactSuffix
                     def distance = versioning.distance
                     doLast {
                         println "VERSION=${version}"
                         println "BASE=${base}"
+                        println "SUFFIX=${suffix}"
                         println "DISTANCE=${distance}"
                     }
                 }
@@ -54,13 +56,14 @@ class CleanroomVersioningPluginTest {
     void localVersionUsesGitDistance() throws Exception {
         initGit();
         commit("init");
-        tag("1.2.3-alpha");
+        tag("1.2.3");
         commit("ahead");
 
         var result = run("printComputed");
         assertEquals(TaskOutcome.SUCCESS, result.task(":printComputed").getOutcome());
-        assertTrue(result.getOutput().contains("VERSION=1.2.3-alpha+local.1"), result.getOutput());
-        assertTrue(result.getOutput().contains("BASE=1.2.3-alpha"), result.getOutput());
+        assertTrue(result.getOutput().contains("VERSION=1.2.3+local.1"), result.getOutput());
+        assertTrue(result.getOutput().contains("BASE=1.2.3"), result.getOutput());
+        assertTrue(result.getOutput().contains("SUFFIX=-alpha"), result.getOutput());
         assertTrue(result.getOutput().contains("DISTANCE=1"), result.getOutput());
     }
 
@@ -68,31 +71,31 @@ class CleanroomVersioningPluginTest {
     void printVersionWritesOnlyTheVersion() throws Exception {
         initGit();
         commit("init");
-        tag("1.2.3-alpha");
+        tag("1.2.3");
 
         var result = run("-q", "printVersion");
-        assertEquals("1.2.3-alpha+local.0", result.getOutput().trim());
+        assertEquals("1.2.3+local.0", result.getOutput().trim());
     }
 
     @Test
     void ciVersionIncludesRunNumber() throws Exception {
         initGit();
         commit("init");
-        tag("1.2.3-alpha");
+        tag("1.2.3");
         commit("ahead");
 
         var result = run("printComputed", "-Pversioning.run=77");
-        assertTrue(result.getOutput().contains("VERSION=1.2.3-alpha+build.1.run.77"), result.getOutput());
+        assertTrue(result.getOutput().contains("VERSION=1.2.3+build.1.run.77"), result.getOutput());
     }
 
     @Test
     void releaseOnTagUsesBaseVersion() throws Exception {
         initGit();
         commit("init");
-        tag("1.2.3-alpha");
+        tag("1.2.3");
 
         var result = run("printComputed", "-Pversioning.publish=true");
-        assertTrue(result.getOutput().contains("VERSION=1.2.3-alpha"), result.getOutput());
+        assertTrue(result.getOutput().contains("VERSION=1.2.3"), result.getOutput());
         assertTrue(result.getOutput().contains("DISTANCE=0"), result.getOutput());
     }
 
@@ -100,7 +103,7 @@ class CleanroomVersioningPluginTest {
     void releaseFailsWhenAheadOfTag() throws Exception {
         initGit();
         commit("init");
-        tag("1.2.3-alpha");
+        tag("1.2.3");
         commit("ahead");
 
         var result = fail("printComputed", "-Pversioning.publish=true");
@@ -111,10 +114,10 @@ class CleanroomVersioningPluginTest {
     void releaseFailsWhenTagDoesNotMatch() throws Exception {
         initGit();
         commit("init");
-        tag("1.2.2-alpha");
+        tag("1.2.2");
 
         var result = fail("printComputed", "-Pversioning.publish=true");
-        assertTrue(result.getOutput().contains("does not match gradle.properties version '1.2.3-alpha'"), result.getOutput());
+        assertTrue(result.getOutput().contains("does not match gradle.properties version '1.2.3'"), result.getOutput());
     }
 
     @Test
@@ -131,14 +134,14 @@ class CleanroomVersioningPluginTest {
     void configurationCacheReusesPrintVersion() throws Exception {
         initGit();
         commit("init");
-        tag("1.2.3-alpha");
+        tag("1.2.3");
 
         var first = run("--configuration-cache", "-q", "printVersion");
-        assertEquals("1.2.3-alpha+local.0", first.getOutput().trim());
+        assertEquals("1.2.3+local.0", first.getOutput().trim());
         var second = run("--configuration-cache", "-q", "printVersion");
-        assertEquals("1.2.3-alpha+local.0", second.getOutput().trim());
+        assertEquals("1.2.3+local.0", second.getOutput().trim());
         assertTrue(second.getOutput().contains("Reusing configuration cache.") || second.getOutput().isBlank() ||
-                second.getOutput().trim().equals("1.2.3-alpha+local.0"), second.getOutput());
+                second.getOutput().trim().equals("1.2.3+local.0"), second.getOutput());
     }
 
     private BuildResult run(String... args) {

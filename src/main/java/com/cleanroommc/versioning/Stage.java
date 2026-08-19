@@ -5,8 +5,7 @@ import java.util.Locale;
 import java.util.stream.Collectors;
 
 /**
- * Allowed release stages. Encoded in the version as a SemVer prerelease identifier,
- * except {@link #RELEASE}, which publishes the numeric version as-is.
+ * Allowed release stages.
  */
 public enum Stage {
 
@@ -44,6 +43,10 @@ public enum Stage {
 
     public boolean isRelease() {
         return this == RELEASE;
+    }
+
+    public String artifactSuffix() {
+        return isRelease() ? "" : "-" + this.id;
     }
 
 }

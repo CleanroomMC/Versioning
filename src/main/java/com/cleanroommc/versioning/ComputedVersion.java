@@ -15,8 +15,8 @@ public final class ComputedVersion {
 
     /**
      * @param version     full project version, including metadata
-     * @param baseVersion version without build metadata
-     * @param stage       stage used to produce {@link #baseVersion()}
+     * @param baseVersion numeric version without build metadata
+     * @param stage       release stage
      * @param git         describe data that contributed the distance
      * @param publish     {@code true} when this version was computed for publishing
      */
@@ -38,6 +38,10 @@ public final class ComputedVersion {
 
     public Stage stage() {
         return this.stage;
+    }
+
+    public String artifactSuffix() {
+        return this.stage.artifactSuffix();
     }
 
     public GitDescribe git() {
