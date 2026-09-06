@@ -2,51 +2,40 @@ package com.cleanroommc.versioning;
 
 import java.util.Arrays;
 import java.util.Locale;
-import java.util.stream.Collectors;
 
 /**
- * Allowed release stages.
+ * Allowed release stages. An independent marker for upload sites and archive names, not part of the version.
  */
 public enum Stage {
 
-    ALPHA("alpha"),
-    BETA("beta"),
-    RC("rc"),
-    RELEASE("release");
+    ALPHA,
+    BETA,
+    RC,
+    RELEASE;
 
+    /**
+     * Parses a stage name, case insensitively.
+     *
+     * @param value the text to parse
+     * @return the parsed stage
+     * @throws IllegalArgumentException if the text names no stage
+     */
     public static Stage parse(String value) {
-        if (value == null || value.trim().isEmpty()) {
-            throw new VersioningException("versioning.stage must be one of: " + ids() + " (got '" + value + "')");
-        }
-        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        String normalized = value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
         for (Stage stage : values()) {
-            if (stage.id.equals(normalized)) {
+            if (stage.name().equals(normalized)) {
                 return stage;
             }
         }
-        throw new VersioningException("versioning.stage must be one of: " + ids() + " (got '" + value + "')");
+        throw new IllegalArgumentException("versioning.stage must be one of "
+                + Arrays.toString(values()).toLowerCase(Locale.ROOT) + " (got '" + value + "')");
     }
 
-    private static String ids() {
-        return Arrays.stream(values()).map(Stage::id).collect(Collectors.joining(", ", "[", "]"));
-    }
-
-    private final String id;
-
-    Stage(String id) {
-        this.id = id;
-    }
-
+    /**
+     * @return the lower case stage name
+     */
     public String id() {
-        return this.id;
-    }
-
-    public boolean isRelease() {
-        return this == RELEASE;
-    }
-
-    public String artifactSuffix() {
-        return isRelease() ? "" : "-" + this.id;
+        return name().toLowerCase(Locale.ROOT);
     }
 
 }

@@ -1,70 +1,74 @@
 package com.cleanroommc.versioning;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.regex.Pattern;
+
 /**
- * Computes a SemVer project version from a declared numeric version, a {@link Stage},
- * {@code git describe} output, and optional publish/CI flags.
- *
- * <p>Three modes, in precedence order:
- * <ol>
- *     <li><b>Publish</b> ({@code publish} is {@code true}): the numeric version verbatim, e.g. {@code 0.6.10}.
- *     Requires the nearest tag to equal that version at distance {@code 0}.</li>
- *     <li><b>CI</b> ({@code run} is non-{@code null}): numeric version plus {@code +build.<distance>.run.<run>}.</li>
- *     <li><b>Local</b> (neither): numeric version plus {@code +local.<distance>}.</li>
- * </ol>
+ * Computes a tag-native project version from Git state and branch policy.
  */
 public final class Versioning {
 
-    /**
-     * Convenience overload that parses the raw {@code stage} and {@code gitDescribe} strings.
-     *
-     * @param numeric     declared numeric version, e.g. {@code 0.6.10}
-     * @param stage       stage id, one of {@code alpha}, {@code beta}, {@code rc}, {@code release}
-     * @param gitDescribe raw {@code git describe --tags --long --always} output, e.g.
-     *                    {@code 0.6.10-48-gf5e9227e}; unparseable or {@code null} input
-     *                    is treated as no tag at distance {@code 0}
-     * @param publish     {@code true} to emit the numeric version and validate tag and distance
-     * @param run         CI run identifier, or {@code null} for a local build
-     * @return the computed version
-     * @throws VersioningException if an argument is invalid, or if {@code publish} is {@code true}
-     *                             and the tag or distance does not match
-     */
-    public static ComputedVersion compute(String numeric, String stage, String gitDescribe, boolean publish, String run) {
-        return compute(new VersionRequest(numeric, Stage.parse(stage), GitDescribe.parse(gitDescribe), publish, run));
-    }
+    // SemVer pre-release identifiers, and a numeric one may not carry a leading zero.
+    private static final Pattern IDENTIFIER = Pattern.compile("[0-9A-Za-z-]+");
+    private static final Pattern LEADING_ZERO = Pattern.compile("0\\d+");
 
     /**
-     * Computes the version for the given request.
+     * Computes the version for the given state.
      *
-     * @param request the inputs; must not be {@code null}
-     * @return the computed version
-     * @throws VersioningException if {@code request} is {@code null}, or if the request is publishing
-     *                             and the nearest tag does not equal {@link VersionRequest#baseVersion()}
-     *                             at distance {@code 0}
+     * @param git      Git state at the build commit
+     * @param label    the pre-release label commits are counted under
+     * @param metadata additional pre-release identifiers, rendered as {@code .<key>.<value>} in iteration order
+     * @return the full version
+     * @throws IllegalArgumentException if the label or any metadata entry is not a SemVer identifier, or if the branch
+     *                                  leads to a version that has already been tagged
      */
-    public static ComputedVersion compute(VersionRequest request) {
-        if (request == null) {
-            throw new VersioningException("request is required");
+    public static String compute(GitState git, String label, Map<String, String> metadata) {
+        SemanticVersion baseline = git.latestTag() == null ? SemanticVersion.INITIAL : git.latestTag();
+        SemanticVersion numeric = baseline;
+        List<String> identifiers = new ArrayList<>();
+        if (!git.exactTag()) {
+            numeric = git.target() == null ? baseline.nextPatch() : requireUnreleased(git.target(), baseline);
+            identifiers.add(requireLabel(label));
+            identifiers.add(Long.toString(git.commits()));
+            metadata.forEach((key, value) -> {
+                identifiers.add(requireIdentifier("metadata key", key));
+                identifiers.add(requireIdentifier("metadata value of '" + key + "'", value));
+            });
         }
-        String base = request.baseVersion();
-        GitDescribe git = request.git();
-        if (request.publish()) {
-            if (git.isMissing()) {
-                throw new VersioningException("No git tag found; expected '" + base + "' (git describe did not return <tag>-<n>-g<hash>; fetch tags in CI)");
+        // Sitting on a tag is itself evidence of publication
+        if (git.dirty() || (!git.pushed() && !git.exactTag())) {
+            identifiers.add("local");
+            if (git.dirty()) {
+                identifiers.add("dirty");
             }
-            if (!git.tag().equals(base)) {
-                throw new VersioningException("Git tag '" + git.tag() + "' does not match gradle.properties version '" + base + "'");
-            }
-            if (git.distance() != 0) {
-                throw new VersioningException("Release must be on a tagged commit (" + git.distance() + " commits ahead of '" + git.tag() + "')");
-            }
-            return new ComputedVersion(base, base, request.stage(), git, true);
         }
-        if (request.run() != null) {
-            String version = base + "+build." + git.distance() + ".run." + request.run();
-            return new ComputedVersion(version, base, request.stage(), git, false);
+        return identifiers.isEmpty() ? numeric.toString() : numeric + "-" + String.join(".", identifiers);
+    }
+
+    private static SemanticVersion requireUnreleased(SemanticVersion target, SemanticVersion baseline) {
+        if (target.compareTo(baseline) <= 0) {
+            throw new IllegalArgumentException("Branch leads to " + target + ", which tag " + baseline
+                    + " has already reached; retarget or delete the branch");
         }
-        String version = base + "+local." + git.distance();
-        return new ComputedVersion(version, base, request.stage(), git, false);
+        return target;
+    }
+
+    private static String requireLabel(String label) {
+        // A numeric label would be ordered against the commit count of another line rather than against a name
+        if (label != null && !label.isEmpty() && label.chars().allMatch(Character::isDigit)) {
+            throw new IllegalArgumentException("versioning.label must not be numeric (got '" + label + "')");
+        }
+        return requireIdentifier("versioning.label", label);
+    }
+
+    private static String requireIdentifier(String name, String value) {
+        if (value == null || !IDENTIFIER.matcher(value).matches() || LEADING_ZERO.matcher(value).matches()) {
+            throw new IllegalArgumentException(name + " must be alphanumerics or hyphens, with no leading zero on a "
+                    + "number (got '" + value + "')");
+        }
+        return value;
     }
 
     private Versioning() { }

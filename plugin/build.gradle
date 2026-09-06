@@ -6,8 +6,11 @@ plugins {
     id 'signing'
 }
 
-group = rootProject.group
+group = providers.gradleProperty('group').get()
 base.archivesName = 'versioning-gradle'
+
+// The plugin ships the core library inside its own jar, so compile it here rather than depending on the root project.
+sourceSets.main.java.srcDir(layout.settingsDirectory.dir('src/main/java'))
 
 java {
     toolchain.languageVersion = JavaLanguageVersion.of(21)
@@ -20,8 +23,6 @@ repositories {
 }
 
 dependencies {
-    implementation rootProject
-
     testImplementation gradleTestKit()
     testImplementation platform('org.junit:junit-bom:5.11.4')
     testImplementation 'org.junit.jupiter:junit-jupiter'
@@ -36,7 +37,7 @@ gradlePlugin {
             id = 'com.cleanroommc.versioning'
             implementationClass = 'com.cleanroommc.versioning.gradle.CleanroomVersioningPlugin'
             displayName = 'Cleanroom Versioning'
-            description = 'Sets project.version from a declared version, stage, and git describe.'
+            description = 'Sets project.version from Git tags, branch policy, and the build environment.'
             tags.set(['version', 'semver', 'git', 'versioning'])
             compatibility {
                 features {
@@ -55,12 +56,8 @@ tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
 
-tasks.named('jar', Jar) {
-    from(rootProject.sourceSets.main.output)
-}
-
-tasks.named('sourcesJar', Jar) {
-    from(rootProject.sourceSets.main.allJava)
+tasks.withType(Javadoc).configureEach {
+    options.addStringOption('Xdoclint:all,-missing', '-quiet')
 }
 
 tasks.withType(GenerateModuleMetadata).configureEach {
@@ -71,16 +68,6 @@ publishing {
     publications {
         pluginMaven(MavenPublication) {
             artifactId = 'versioning-gradle'
-        }
-    }
-    publications.withType(MavenPublication).configureEach { publication ->
-        publication.pom.withXml {
-            def dependenciesNode = asNode().dependencies
-            if (dependenciesNode != null) {
-                dependenciesNode.dependency
-                        .findAll { it.artifactId.text() == 'versioning' }
-                        .each { it.parent().remove(it) }
-            }
         }
     }
     repositories {

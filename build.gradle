@@ -13,11 +13,6 @@ java {
     withJavadocJar()
 }
 
-tasks.named('compileJava', JavaCompile) {
-    options.release = 8
-    options.compilerArgs.add('-Xlint:-options')
-}
-
 repositories {
     mavenCentral()
 }
@@ -34,6 +29,10 @@ tasks.named('test', Test) {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
+}
+
+tasks.withType(Javadoc).configureEach {
+    options.addStringOption('Xdoclint:all,-missing', '-quiet')
 }
 
 publishing {

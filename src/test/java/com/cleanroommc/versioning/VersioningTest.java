@@ -5,120 +5,116 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class VersioningTest {
 
     @Test
-    void localAlphaAppendsDistance() {
-        var computed = Versioning.compute("0.6.10", "alpha", "0.6.10-48-gf5e9227e", false, null);
-        assertEquals("0.6.10+local.48", computed.version());
-        assertEquals("0.6.10", computed.baseVersion());
-        assertEquals("-alpha", computed.artifactSuffix());
-        assertEquals(Stage.ALPHA, computed.stage());
-        assertEquals(48, computed.git().distance());
-        assertEquals("0.6.10", computed.git().tag());
-        assertFalse(computed.publish());
-        assertEquals("0.6.10+local.48", computed.toString());
+    void exactTagIsTheTagItself() {
+        assertEquals("1.1.1", Versioning.compute(onTag("1.1.1", false, true), "dev", Map.of()));
+    }
+
+    // The patch only ever moves once off a tag, no matter how many commits follow.
+    @Test
+    void offTagLeadsToTheNextPatch() {
+        assertEquals("1.1.2-dev.3", compute("1.1.1", null, 3));
+        assertEquals("1.1.2-dev.9", compute("1.1.1", null, 9));
     }
 
     @Test
-    void localReleaseStageHasNoArtifactSuffix() {
-        var computed = Versioning.compute("0.6.10", "release", "0.6.10-3-gabcdef0", false, null);
-        assertEquals("0.6.10+local.3", computed.version());
-        assertEquals("0.6.10", computed.baseVersion());
-        assertEquals("", computed.artifactSuffix());
-        assertEquals(Stage.RELEASE, computed.stage());
+    void developmentTargetPinsTheNumber() {
+        assertEquals("1.4.0-dev.7", compute("1.1.1", "1.4.0", 7));
+        assertEquals("2.0.0-dev.20", compute("1.1.1", "2.0.0", 20));
     }
 
     @Test
-    void ciUsesRunNumber() {
-        var computed = Versioning.compute("0.6.10", "alpha", "0.6.10-48-gf5e9227e", false, "123");
-        assertEquals("0.6.10+build.48.run.123", computed.version());
-        assertEquals("0.6.10", computed.baseVersion());
-        assertFalse(computed.publish());
+    void noTagCountsFromTheInitialBaseline() {
+        assertEquals("0.0.1-dev.7", Versioning.compute(new GitState(null, null, 7, false, false, true), "dev", Map.of()));
+    }
+
+    // The back-merge case: once the target has been tagged the branch would compute below its own release.
+    @ParameterizedTest
+    @CsvSource({"1.4.0, 1.4.0", "1.5.0, 1.4.0"})
+    void targetAtOrBelowTheTagIsRejected(String tag, String target) {
+        var exception = assertThrows(IllegalArgumentException.class, () -> compute(tag, target, 3));
+        assertEquals("Branch leads to " + target + ", which tag " + tag
+                + " has already reached; retarget or delete the branch", exception.getMessage());
     }
 
     @Test
-    void releaseOnMatchingTag() {
-        var computed = Versioning.compute("0.6.10", "alpha", "0.6.10-0-gf5e9227e", true, null);
-        assertEquals("0.6.10", computed.version());
-        assertEquals("0.6.10", computed.baseVersion());
-        assertTrue(computed.publish());
+    void metadataFollowsTheLabelInIterationOrder() {
+        var metadata = new LinkedHashMap<String, String>();
+        metadata.put("run", "24");
+        metadata.put("commit", "a3f9c2");
+        assertEquals("1.1.2-dev.1.run.24.commit.a3f9c2",
+                Versioning.compute(state("1.1.1", null, 1, false, true), "dev", metadata));
     }
 
     @Test
-    void releaseIgnoresRunNumber() {
-        var computed = Versioning.compute("0.6.10", "alpha", "0.6.10-0-gf5e9227e", true, "99");
-        assertEquals("0.6.10", computed.version());
-        assertTrue(computed.publish());
+    void exactTagDropsTheLabelAndMetadata() {
+        assertEquals("1.1.1", Versioning.compute(onTag("1.1.1", false, true), "dev", Map.of("run", "24")));
     }
 
     @Test
-    void releaseRejectsTagMismatch() {
-        var ex = assertThrows(VersioningException.class, () -> Versioning.compute("0.6.10", "alpha", "0.6.9-0-gf5e9227e", true, null));
-        assertEquals("Git tag '0.6.9' does not match gradle.properties version '0.6.10'", ex.getMessage());
+    void labelIsConfigurable() {
+        assertEquals("1.1.2-nightly.3", Versioning.compute(state("1.1.1", null, 3, false, true), "nightly", Map.of()));
     }
 
     @Test
-    void releaseRejectsDistance() {
-        var ex = assertThrows(VersioningException.class, () -> Versioning.compute("0.6.10", "alpha", "0.6.10-48-gf5e9227e", true, null));
-        assertEquals("Release must be on a tagged commit (48 commits ahead of '0.6.10')", ex.getMessage());
+    void unpushedCommitIsMarkedLocal() {
+        assertEquals("1.1.2-dev.3.local", Versioning.compute(state("1.1.1", null, 3, false, false), "dev", Map.of()));
     }
 
     @Test
-    void releaseRejectsUnparseableDescribe() {
-        var ex = assertThrows(VersioningException.class, () -> Versioning.compute("0.6.10", "alpha", "f5e9227e", true, null));
-        assertEquals("No git tag found; expected '0.6.10' (git describe did not return <tag>-<n>-g<hash>; fetch tags in CI)", ex.getMessage());
+    void dirtyWorktreeIsMarkedLocalAndDirtyAfterTheMetadata() {
+        assertEquals("1.1.2-dev.3.run.24.local.dirty",
+                Versioning.compute(state("1.1.1", null, 3, true, true), "dev", Map.of("run", "24")));
+    }
+
+    // A bare or single-branch checkout of a released tag has no remote-tracking ref containing HEAD.
+    @ParameterizedTest
+    @CsvSource({"false, false, 1.1.1", "false, true, 1.1.1", "true, false, 1.1.1-local.dirty", "true, true, 1.1.1-local.dirty"})
+    void exactTagIsNeverLocalUnlessDirty(boolean dirty, boolean pushed, String expected) {
+        assertEquals(expected, Versioning.compute(onTag("1.1.1", dirty, pushed), "dev", Map.of()));
     }
 
     @ParameterizedTest
-    @CsvSource({
-            "alpha, 0.6.10+local.0, -alpha",
-            "beta, 0.6.10+local.0, -beta",
-            "rc, 0.6.10+local.0, -rc",
-            "release, 0.6.10+local.0, ''",
-    })
-    void stages(String stage, String expectedVersion, String expectedSuffix) {
-        var computed = Versioning.compute("0.6.10", stage, "0.6.10-0-gabc", false, null);
-        assertEquals(expectedVersion, computed.version());
-        assertEquals("0.6.10", computed.baseVersion());
-        assertEquals(expectedSuffix, computed.artifactSuffix());
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {"", "nightly", "snapshot", "final"})
-    void rejectsInvalidStage(String stage) {
-        var ex = assertThrows(VersioningException.class, () -> Versioning.compute("0.6.10", stage, "0.6.10-0-gabc", false, null));
-        assertTrue(ex.getMessage().contains("versioning.stage must be one of"), ex.getMessage());
-        assertTrue(ex.getMessage().contains(stage), ex.getMessage());
+    @ValueSource(strings = {"", "dev build", "dev.1", "01"})
+    void invalidLabelIsRejected(String label) {
+        assertThrows(IllegalArgumentException.class,
+                () -> Versioning.compute(state("1.1.1", null, 3, false, true), label, Map.of()));
     }
 
     @Test
-    void rejectsMissingVersion() {
-        assertThrows(VersioningException.class, () -> Versioning.compute("unspecified", "alpha", "0.6.10-0-gabc", false, null));
-        assertThrows(VersioningException.class, () -> Versioning.compute("  ", "alpha", "0.6.10-0-gabc", false, null));
-    }
-
-    @Test
-    void requestBaseVersionIsNumeric() {
-        var alpha = new VersionRequest("0.6.10", Stage.ALPHA, GitDescribe.missing(), false, null);
-        assertEquals("0.6.10", alpha.baseVersion());
-        assertEquals("0.6.10", new VersionRequest("0.6.10", Stage.RELEASE, GitDescribe.missing(), false, null).baseVersion());
+    void numericLabelIsRejected() {
+        var exception = assertThrows(IllegalArgumentException.class,
+                () -> Versioning.compute(state("1.1.1", null, 3, false, true), "1", Map.of()));
+        assertEquals("versioning.label must not be numeric (got '1')", exception.getMessage());
     }
 
     @ParameterizedTest
-    @CsvSource({
-            "alpha, -alpha",
-            "beta, -beta",
-            "rc, -rc",
-            "release, ''",
-    })
-    void artifactSuffix(String stage, String expected) {
-        assertEquals(expected, Stage.parse(stage).artifactSuffix());
+    @CsvSource({"run number, 24", "run, 0024", "run, a3f9 c2"})
+    void invalidMetadataIsRejected(String key, String value) {
+        assertThrows(IllegalArgumentException.class,
+                () -> Versioning.compute(state("1.1.1", null, 3, false, true), "dev", Map.of(key, value)));
+    }
+
+    private static String compute(String tag, String target, long commits) {
+        return Versioning.compute(state(tag, target, commits, false, true), "dev", Map.of());
+    }
+
+    private static GitState state(String tag, String target, long commits, boolean dirty, boolean pushed) {
+        return new GitState(SemanticVersion.parse(tag), target == null ? null : SemanticVersion.parse(target),
+                commits, false, dirty, pushed);
+    }
+
+    // A non-zero counter, because a tag build has to ignore it rather than happen to render zero.
+    private static GitState onTag(String tag, boolean dirty, boolean pushed) {
+        return new GitState(SemanticVersion.parse(tag), null, 12, true, dirty, pushed);
     }
 
 }

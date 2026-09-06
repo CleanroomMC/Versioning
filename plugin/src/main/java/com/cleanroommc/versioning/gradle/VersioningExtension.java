@@ -1,56 +1,94 @@
 package com.cleanroommc.versioning.gradle;
 
-import com.cleanroommc.versioning.ComputedVersion;
-import com.cleanroommc.versioning.GitDescribe;
+import com.cleanroommc.versioning.Stage;
+import org.gradle.api.model.ObjectFactory;
+import org.gradle.api.provider.MapProperty;
+import org.gradle.api.provider.Property;
 
 import javax.inject.Inject;
 
 /**
- * Read-only view of the version computed when the plugin was applied.
+ * Configures the version label and exposes the computed version.
  */
 public abstract class VersioningExtension {
 
-    private final ComputedVersion computed;
+    private final Property<Stage> stage;
 
+    /**
+     * @param objects the injected object factory
+     */
     @Inject
-    public VersioningExtension(ComputedVersion computed) {
-        this.computed = computed;
+    public VersioningExtension(ObjectFactory objects) {
+        this.stage = objects.property(Stage.class);
     }
 
-    public ComputedVersion getComputed() {
-        return this.computed;
+    /**
+     * The branch a release tag has to be reachable from, {@code master} by default.
+     *
+     * @return the release branch name
+     */
+    public abstract Property<String> getReleaseBranch();
+
+    /**
+     * The path prefix marking a development branch, {@code develop} by default. A branch named
+     * {@code <prefix>/<major>.<minor>} stays on that version and only advances the label.
+     *
+     * @return the development branch prefix
+     */
+    public abstract Property<String> getDevelopmentPrefix();
+
+    /**
+     * The pre-release label commits are counted under, {@code dev} by default.
+     *
+     * @return the label
+     */
+    public abstract Property<String> getLabel();
+
+    /**
+     * Additional pre-release identifiers, rendered as {@code .<key>.<value>} after the label in insertion order.
+     * Under GitHub Actions the run number is emitted as {@code run} ahead of these.
+     *
+     * @return the metadata
+     */
+    public abstract MapProperty<String, String> getMetadata();
+
+    /**
+     * The release stage. Unset, it comes from the {@code versioning.stage} Gradle property, and failing that it is
+     * {@link Stage#BETA} while the version line is below {@code 1.0.0} and {@link Stage#RELEASE} from there on.
+     *
+     * @return the stage
+     */
+    public Property<Stage> getStage() {
+        return this.stage;
     }
 
-    public String getVersion() {
-        return this.computed.version();
+    /**
+     * @param value the stage
+     */
+    public void setStage(Stage value) {
+        this.stage.set(value);
     }
 
-    public String getBaseVersion() {
-        return this.computed.baseVersion();
+    /**
+     * Sets the stage from its name, case insensitively.
+     *
+     * @param value the stage name
+     * @throws IllegalArgumentException if the text names no stage
+     */
+    public void setStage(String value) {
+        this.stage.set(Stage.parse(value));
     }
 
-    public String getStage() {
-        return this.computed.stage().id();
-    }
+    /**
+     * The version assigned to {@code project.version}. The plugin wires and locks this.
+     *
+     * @return the computed version
+     */
+    public abstract Property<String> getVersion();
 
-    public String getArtifactSuffix() {
-        return this.computed.artifactSuffix();
-    }
-
-    public GitDescribe getGit() {
-        return this.computed.git();
-    }
-
-    public String getTag() {
-        return this.computed.git().tag();
-    }
-
-    public int getDistance() {
-        return this.computed.git().distance();
-    }
-
-    public boolean isPublish() {
-        return this.computed.publish();
+    @Override
+    public String toString() {
+        return getVersion().get();
     }
 
 }

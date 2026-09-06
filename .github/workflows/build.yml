@@ -1,0 +1,55 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - master
+      - 'develop/**'
+  pull_request:
+    branches:
+      - master
+      - 'develop/**'
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Test
+        run: ./gradlew test
+
+      - name: Print version
+        id: version
+        run: |
+          version=$(./gradlew -q --console=plain :printVersion)
+          echo "$version"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      # A branch created at a release tag computes the bare release coordinate, and publishing that from a
+      # development push would overwrite the release. Only a pre-release version belongs here.
+      - name: Publish development build
+        if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/develop/') && contains(steps.version.outputs.value, '-') }}
+        env:
+          ORG_GRADLE_PROJECT_CleanroomMavenUsername: ${{ secrets.MAVEN_NAME }}
+          ORG_GRADLE_PROJECT_CleanroomMavenPassword: ${{ secrets.MAVEN_PASSWORD }}
+        run: ./gradlew publish --no-configuration-cache

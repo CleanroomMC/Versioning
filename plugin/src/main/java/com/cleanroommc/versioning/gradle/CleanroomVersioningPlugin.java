@@ -1,60 +1,107 @@
 package com.cleanroommc.versioning.gradle;
 
-import com.cleanroommc.versioning.ComputedVersion;
-import com.cleanroommc.versioning.Versioning;
-import com.cleanroommc.versioning.VersioningException;
+import com.cleanroommc.versioning.SemanticVersion;
+import com.cleanroommc.versioning.Stage;
 import org.gradle.api.GradleException;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
+import org.gradle.api.provider.Provider;
+import org.gradle.api.provider.ProviderFactory;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
- * Sets {@code project.version} from {@code version}, {@code versioning.stage},
- * {@code git describe}, and optional {@code versioning.publish}/{@code versioning.run} properties.
+ * Sets {@code project.version} from Git tags, branch policy, and the build environment.
  */
 public abstract class CleanroomVersioningPlugin implements Plugin<Project> {
 
+    /**
+     * The plugin identifier.
+     */
     public static final String PLUGIN_ID = "com.cleanroommc.versioning";
+
+    /**
+     * The name of the {@link VersioningExtension}.
+     */
     public static final String EXTENSION_NAME = "versioning";
+
+    /**
+     * The name of the task that prints the computed version.
+     */
     public static final String PRINT_VERSION_TASK = "printVersion";
 
     @Override
     public void apply(Project project) {
-        ComputedVersion computed = compute(project);
-        project.setVersion(computed.version());
-        if (project.getExtensions().findByName(EXTENSION_NAME) == null) {
-            project.getExtensions().create(EXTENSION_NAME, VersioningExtension.class, computed);
+        if (!"unspecified".equals(project.getVersion().toString())) {
+            throw new GradleException("Cleanroom Versioning v3 derives project.version from Git, remove the declared 'version' property");
         }
-        if (project.getTasks().findByName(PRINT_VERSION_TASK) == null) {
-            var printed = computed.version();
-            project.getTasks().register(PRINT_VERSION_TASK, task -> {
-                task.setGroup("help");
-                task.setDescription("Prints the computed project version.");
-                task.doLast(t -> System.out.println(printed));
-            });
-        }
+
+        ProviderFactory providers = project.getProviders();
+        VersioningExtension extension = project.getExtensions().create(EXTENSION_NAME, VersioningExtension.class);
+        // java-gradle-plugin reads project.version while the plugins block is still running
+        // which freezes the configuration before a build script can set it
+        extension.getReleaseBranch().convention(providers.gradleProperty("versioning.releaseBranch").orElse("master"));
+        extension.getDevelopmentPrefix().convention(providers.gradleProperty("versioning.developmentPrefix").orElse("develop"));
+        extension.getLabel().convention(providers.gradleProperty("versioning.label").orElse("dev"));
+        extension.getReleaseBranch().finalizeValueOnRead();
+        extension.getDevelopmentPrefix().finalizeValueOnRead();
+        extension.getLabel().finalizeValueOnRead();
+
+        Provider<GitSnapshot> snapshot = project.getGradle().getSharedServices()
+                .registerIfAbsent(GitSnapshotService.NAME, GitSnapshotService.class)
+                .get()
+                .snapshot(project.getProjectDir(), () -> providers.of(GitSnapshotValueSource.class, spec -> {
+                    var parameters = spec.getParameters();
+                    parameters.getRepositoryDirectory().set(project.getLayout().getProjectDirectory());
+                }));
+
+        // Merged rather than left to a convention
+        Provider<Map<String, String>> metadata = providers.environmentVariable("GITHUB_RUN_NUMBER")
+                .map(run -> Map.of("run", run))
+                .orElse(Map.of())
+                .zip(extension.getMetadata(), (run, configured) -> {
+                    Map<String, String> merged = new LinkedHashMap<>(run);
+                    merged.putAll(configured);
+                    return merged;
+                });
+
+        extension.getStage().convention(providers.gradleProperty("versioning.stage").map(Stage::parse)
+                .orElse(snapshot.map(state -> defaultStage(state.latestTag()))));
+        extension.getStage().finalizeValueOnRead();
+
+        extension.getVersion().set(providers.of(ComputedVersionValueSource.class, spec -> {
+            var parameters = spec.getParameters();
+            parameters.getGitSnapshot().set(snapshot);
+            parameters.getRepositoryDirectory().set(project.getLayout().getProjectDirectory());
+            parameters.getReleaseBranch().set(extension.getReleaseBranch());
+            parameters.getDevelopmentPrefix().set(extension.getDevelopmentPrefix());
+            parameters.getLabel().set(extension.getLabel());
+            parameters.getMetadata().set(metadata);
+            parameters.getStage().set(extension.getStage());
+            parameters.getGithubActions().set(providers.environmentVariable("GITHUB_ACTIONS").orElse(""));
+            parameters.getGithubRefType().set(providers.environmentVariable("GITHUB_REF_TYPE").orElse(""));
+            parameters.getGithubRefName().set(providers.environmentVariable("GITHUB_REF_NAME").orElse(""));
+            parameters.getGithubHeadRef().set(providers.environmentVariable("GITHUB_HEAD_REF").orElse(""));
+        }));
+        extension.getVersion().finalizeValueOnRead();
+        extension.getVersion().disallowChanges();
+
+        project.setVersion(extension);
+        project.afterEvaluate(target -> {
+            if (target.getVersion() != extension) {
+                throw new GradleException("Cleanroom Versioning v3 derives project.version from Git, remove the declared 'version' property");
+            }
+        });
+        project.getTasks().register(PRINT_VERSION_TASK, PrintVersionTask.class, task -> {
+            task.setGroup("help");
+            task.setDescription("Prints the computed project version.");
+            task.getVersion().set(extension.getVersion());
+        });
     }
 
-    public static ComputedVersion compute(Project project) {
-        var providers = project.getProviders();
-        var stage = providers.gradleProperty("versioning.stage");
-        if (!stage.isPresent()) {
-            throw new GradleException("versioning.stage must be one of: [alpha, beta, rc, release] (got 'null')");
-        }
-        var gitInfo = providers.exec(spec -> {
-            spec.commandLine("git", "describe", "--tags", "--long", "--always");
-            spec.setWorkingDir(project.getLayout().getProjectDirectory());
-            spec.setIgnoreExitValue(true);
-        }).getStandardOutput().getAsText();
-        try {
-            return Versioning.compute(
-                    project.getVersion().toString(),
-                    stage.get(),
-                    gitInfo.get(),
-                    providers.gradleProperty("versioning.publish").isPresent(),
-                    providers.gradleProperty("versioning.run").getOrNull()
-            );
-        } catch (VersioningException e) {
-            throw new GradleException(e.getMessage(), e);
-        }
+    private static Stage defaultStage(SemanticVersion latestTag) {
+        return latestTag == null || latestTag.major() == 0 ? Stage.BETA : Stage.RELEASE;
     }
+
 }
