@@ -55,14 +55,13 @@ public abstract class GitSnapshotValueSource implements ValueSource<GitSnapshot,
         String tagName = latestTagName();
         SemanticVersion latestTag = tagName == null ? null : SemanticVersion.parse(tagName);
         // The whole history rather than the distance from the tag
-        // A back-merge can pull a newer tag into a development line
-        // and a distance would then reset the counter below numbers that line already published
-        long commits = parseCount(require("rev-list", "--count", "HEAD"));
-        boolean exactTag = tagName != null && parseCount(require("rev-list", "--count", tagName + "..HEAD")) == 0;
+        long distance = tagName == null
+                ? parseCount(require("rev-list", "--count", "HEAD"))
+                : parseCount(require("rev-list", "--count", tagName + "..HEAD"));
         boolean pushed = !git("for-each-ref", "--contains", "HEAD", "--count=1", "refs/remotes/").output().isEmpty();
 
         CommandResult branch = git("symbolic-ref", "--quiet", "--short", "HEAD");
-        return new GitSnapshot(latestTag, commits, exactTag, dirty, pushed, shallow,
+        return new GitSnapshot(latestTag, distance, dirty, pushed, shallow,
                 branch.success() ? branch.output() : "");
     }
 

@@ -32,7 +32,7 @@ public final class Versioning {
         if (!git.exactTag()) {
             numeric = git.target() == null ? baseline.nextPatch() : requireUnreleased(git.target(), baseline);
             preRelease.add(requireLabel(label));
-            preRelease.add(Long.toString(git.commits()));
+            preRelease.add(Long.toString(git.distance()));
             metadata.forEach((key, value) -> {
                 build.add(requireIdentifier("metadata key", key, true));
                 build.add(requireIdentifier("metadata value of '" + key + "'", value, true));

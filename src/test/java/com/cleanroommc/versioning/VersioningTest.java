@@ -33,7 +33,7 @@ class VersioningTest {
 
     @Test
     void noTagCountsFromTheInitialBaseline() {
-        assertEquals("0.0.1-dev.7", Versioning.compute(new GitState(null, null, 7, false, false, true), "dev", Map.of()));
+        assertEquals("0.0.1-dev.7", Versioning.compute(new GitState(null, null, 7, false, true), "dev", Map.of()));
     }
 
     // The back-merge case: once the target has been tagged the branch would compute below its own release.
@@ -111,18 +111,17 @@ class VersioningTest {
                 () -> Versioning.compute(state("1.1.1", null, 3, false, true), "dev", Map.of(key, value)));
     }
 
-    private static String compute(String tag, String target, long commits) {
-        return Versioning.compute(state(tag, target, commits, false, true), "dev", Map.of());
+    private static String compute(String tag, String target, long distance) {
+        return Versioning.compute(state(tag, target, distance, false, true), "dev", Map.of());
     }
 
-    private static GitState state(String tag, String target, long commits, boolean dirty, boolean pushed) {
+    private static GitState state(String tag, String target, long distance, boolean dirty, boolean pushed) {
         return new GitState(SemanticVersion.parse(tag), target == null ? null : SemanticVersion.parse(target),
-                commits, false, dirty, pushed);
+                distance, dirty, pushed);
     }
 
-    // A non-zero counter, because a tag build has to ignore it rather than happen to render zero.
     private static GitState onTag(String tag, boolean dirty, boolean pushed) {
-        return new GitState(SemanticVersion.parse(tag), null, 12, true, dirty, pushed);
+        return new GitState(SemanticVersion.parse(tag), null, 0, dirty, pushed);
     }
 
 }

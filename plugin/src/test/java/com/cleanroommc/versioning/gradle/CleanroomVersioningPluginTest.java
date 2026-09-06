@@ -69,7 +69,7 @@ class CleanroomVersioningPluginTest {
         tag("1.2.3");
         commit("ahead");
 
-        assertVersion(run("-q", "printVersion"), "1.2.4-dev.2.local");
+        assertVersion(run("-q", "printVersion"), "1.2.4-dev.1.local");
     }
 
     // The whole line between two tags stays on one number; only the label counter moves.
@@ -84,7 +84,7 @@ class CleanroomVersioningPluginTest {
             versions.add(versionLine(run("-q", "printVersion")));
         }
 
-        assertEquals(List.of("1.2.4-dev.2.local", "1.2.4-dev.3.local", "1.2.4-dev.4.local"), versions);
+        assertEquals(List.of("1.2.4-dev.1.local", "1.2.4-dev.2.local", "1.2.4-dev.3.local"), versions);
     }
 
     @Test
@@ -95,10 +95,10 @@ class CleanroomVersioningPluginTest {
         git("switch", "-c", "develop/1.4");
         commit("development");
 
-        assertVersion(run("-q", "printVersion"), "1.4.0-dev.2.local");
+        assertVersion(run("-q", "printVersion"), "1.4.0-dev.1.local");
 
         commit("more development");
-        assertVersion(run("-q", "printVersion"), "1.4.0-dev.3.local");
+        assertVersion(run("-q", "printVersion"), "1.4.0-dev.2.local");
     }
 
     // Long horizon work and the next minor run side by side, each pinned to its own number.
@@ -109,12 +109,12 @@ class CleanroomVersioningPluginTest {
         tag("1.3.2");
         git("switch", "-c", "develop/1.4");
         commit("minor work");
-        assertVersion(run("-q", "printVersion"), "1.4.0-dev.2.local");
+        assertVersion(run("-q", "printVersion"), "1.4.0-dev.1.local");
 
         git("switch", "master");
         git("switch", "-c", "develop/2.0");
         commit("major work");
-        assertVersion(run("-q", "printVersion"), "2.0.0-dev.2.local");
+        assertVersion(run("-q", "printVersion"), "2.0.0-dev.1.local");
     }
 
     @Test
@@ -125,7 +125,7 @@ class CleanroomVersioningPluginTest {
         git("switch", "-c", "develop/v1.4.0");
         commit("development");
 
-        assertVersion(run("-q", "printVersion"), "1.4.0-dev.2.local");
+        assertVersion(run("-q", "printVersion"), "1.4.0-dev.1.local");
     }
 
     @Test
@@ -160,37 +160,14 @@ class CleanroomVersioningPluginTest {
         commit("initial");
         tag("1.3.2");
         commit("hotfix");
-        assertVersion(run("-q", "printVersion"), "1.3.3-dev.2.local");
+        assertVersion(run("-q", "printVersion"), "1.3.3-dev.1.local");
 
         git("switch", "-c", "develop/1.4");
         commit("development");
         git("switch", "master");
         git("merge", "--no-ff", "develop/1.4", "-m", "release");
 
-        assertVersion(run("-q", "printVersion"), "1.3.3-dev.4.local");
-    }
-
-    // A patch tag cut on top of merged development work becomes the new baseline of that development line. Counting
-    // from it would drop the label below numbers the line has already published.
-    @Test
-    void theCounterSurvivesAPatchTagOvertakingTheLine() throws Exception {
-        initGit();
-        commit("initial");
-        tag("1.3.0");
-        git("switch", "-c", "develop/1.4");
-        for (int index = 1; index <= 4; index++) {
-            commit("development " + index);
-        }
-        assertVersion(run("-q", "printVersion"), "1.4.0-dev.5.local");
-
-        git("switch", "master");
-        git("merge", "--no-ff", "develop/1.4", "-m", "integrate");
-        commit("hotfix");
-        tag("1.3.1");
-        git("switch", "develop/1.4");
-        git("merge", "--no-ff", "master", "-m", "back-merge");
-
-        assertVersion(run("-q", "printVersion"), "1.4.0-dev.8.local");
+        assertVersion(run("-q", "printVersion"), "1.3.3-dev.3.local");
     }
 
     @Test
@@ -210,7 +187,7 @@ class CleanroomVersioningPluginTest {
         tag("1.1.99");
         tag("latest");
 
-        assertVersion(run("-q", "printVersion"), "1.2.4-dev.2.local");
+        assertVersion(run("-q", "printVersion"), "1.2.4-dev.1.local");
     }
 
     @Test
@@ -231,7 +208,7 @@ class CleanroomVersioningPluginTest {
         commit("ahead");
         setRemoteBranch("master");
 
-        assertVersion(run("-q", "printVersion"), "1.2.4-dev.2");
+        assertVersion(run("-q", "printVersion"), "1.2.4-dev.1");
     }
 
     @Test
@@ -241,7 +218,7 @@ class CleanroomVersioningPluginTest {
         tag("1.2.3");
         commit("hotfix");
 
-        assertVersion(run(githubBranch("master", "78"), "-q", "printVersion"), "1.2.4-dev.2+run.78");
+        assertVersion(run(githubBranch("master", "78"), "-q", "printVersion"), "1.2.4-dev.1+run.78");
     }
 
     @Test
@@ -252,7 +229,7 @@ class CleanroomVersioningPluginTest {
         git("switch", "-c", "develop/1.4");
         commit("development");
 
-        assertVersion(run(githubBranch("develop/1.4", "77"), "-q", "printVersion"), "1.4.0-dev.2+run.77");
+        assertVersion(run(githubBranch("develop/1.4", "77"), "-q", "printVersion"), "1.4.0-dev.1+run.77");
     }
 
     // The head ref is the branch the pull request builds, whatever it targets.
@@ -264,11 +241,11 @@ class CleanroomVersioningPluginTest {
         git("switch", "-c", "develop/1.4");
         commit("development");
 
-        assertVersion(run(githubPullRequest("develop/1.4", "79"), "-q", "printVersion"), "1.4.0-dev.2+run.79");
+        assertVersion(run(githubPullRequest("develop/1.4", "79"), "-q", "printVersion"), "1.4.0-dev.1+run.79");
 
         git("switch", "-c", "feature/test");
         commit("feature");
-        assertVersion(run(githubPullRequest("feature/test", "80"), "-q", "printVersion"), "1.2.4-dev.3+run.80");
+        assertVersion(run(githubPullRequest("feature/test", "80"), "-q", "printVersion"), "1.2.4-dev.2+run.80");
     }
 
     @Test
@@ -279,8 +256,8 @@ class CleanroomVersioningPluginTest {
         git("switch", "-c", "feature/test");
         commit("feature");
 
-        assertVersion(run("-q", "printVersion"), "1.2.4-dev.2.local");
-        assertVersion(run(githubBranch("feature/test", "83"), "-q", "printVersion"), "1.2.4-dev.2+run.83");
+        assertVersion(run("-q", "printVersion"), "1.2.4-dev.1.local");
+        assertVersion(run(githubBranch("feature/test", "83"), "-q", "printVersion"), "1.2.4-dev.1+run.83");
     }
 
     @Test
@@ -305,7 +282,7 @@ class CleanroomVersioningPluginTest {
         tag("1.2.3");
         commit("ahead");
 
-        assertVersion(run("-q", "printVersion"), "1.2.4-nightly.2.local");
+        assertVersion(run("-q", "printVersion"), "1.2.4-nightly.1.local");
     }
 
     @Test
@@ -321,7 +298,7 @@ class CleanroomVersioningPluginTest {
         git("switch", "-c", "next/1.4");
         commit("next");
 
-        assertVersion(run("-q", "printVersion"), "1.4.0-dev.2.local");
+        assertVersion(run("-q", "printVersion"), "1.4.0-dev.1.local");
     }
 
     // Metadata is appended in insertion order, behind the run number the plugin contributes under Actions.
@@ -337,8 +314,8 @@ class CleanroomVersioningPluginTest {
         tag("1.2.3");
         commit("ahead");
 
-        assertVersion(run(githubBranch("master", "90"), "-q", "printVersion"), "1.2.4-dev.2+run.90.commit.a3f9c2");
-        assertVersion(run("-q", "printVersion"), "1.2.4-dev.2.local+commit.a3f9c2");
+        assertVersion(run(githubBranch("master", "90"), "-q", "printVersion"), "1.2.4-dev.1+run.90.commit.a3f9c2");
+        assertVersion(run("-q", "printVersion"), "1.2.4-dev.1.local+commit.a3f9c2");
     }
 
     // The run number is not part of the property, so assigning the map outright cannot drop it.
@@ -354,7 +331,7 @@ class CleanroomVersioningPluginTest {
         tag("1.2.3");
         commit("ahead");
 
-        assertVersion(run(githubBranch("master", "91"), "-q", "printVersion"), "1.2.4-dev.2+run.91.commit.a3f9c2");
+        assertVersion(run(githubBranch("master", "91"), "-q", "printVersion"), "1.2.4-dev.1+run.91.commit.a3f9c2");
     }
 
     @Test
@@ -392,7 +369,7 @@ class CleanroomVersioningPluginTest {
         git("switch", "-c", "next/1.4");
         commit("next");
 
-        assertVersion(run("-q", "printVersion"), "1.4.0-nightly.2.local");
+        assertVersion(run("-q", "printVersion"), "1.4.0-nightly.1.local");
     }
 
     @Test
@@ -465,7 +442,7 @@ class CleanroomVersioningPluginTest {
         assertVersion(run("-q", "printVersion"), "1.2.0");
 
         commit("ahead");
-        assertVersion(run("-q", "printVersion"), "1.2.1-dev.2.local");
+        assertVersion(run("-q", "printVersion"), "1.2.1-dev.1.local");
 
         setRemoteBranch("master");
         tag("v1.2.1");
@@ -481,7 +458,7 @@ class CleanroomVersioningPluginTest {
         tag("2.0.0");
         commit("ahead");
 
-        assertVersion(run("-q", "printVersion"), "2.0.1-dev.2.local");
+        assertVersion(run("-q", "printVersion"), "2.0.1-dev.1.local");
     }
 
     @Test
@@ -625,7 +602,7 @@ class CleanroomVersioningPluginTest {
 
         commit("ahead");
         var second = run("--configuration-cache", "-q", "printVersion");
-        assertVersion(second, "1.2.4-dev.2.local");
+        assertVersion(second, "1.2.4-dev.1.local");
         assertNotEquals(versionLine(first), versionLine(second));
     }
 
@@ -653,13 +630,13 @@ class CleanroomVersioningPluginTest {
         assertVersion(run("--configuration-cache", "-q", "printVersion"), "1.2.3");
 
         commit("ahead");
-        assertVersion(run("--configuration-cache", "-q", "printVersion"), "1.2.4-dev.2.local");
+        assertVersion(run("--configuration-cache", "-q", "printVersion"), "1.2.4-dev.1.local");
 
         git("switch", "-c", "develop/1.4");
-        assertVersion(run("--configuration-cache", "-q", "printVersion"), "1.4.0-dev.2.local");
+        assertVersion(run("--configuration-cache", "-q", "printVersion"), "1.4.0-dev.1.local");
 
         Files.writeString(this.projectDir.resolve("dirty.txt"), "dirty\n");
-        assertVersion(run("--configuration-cache", "-q", "printVersion"), "1.4.0-dev.2.local.dirty");
+        assertVersion(run("--configuration-cache", "-q", "printVersion"), "1.4.0-dev.1.local.dirty");
     }
 
     @Test

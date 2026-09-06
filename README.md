@@ -25,32 +25,30 @@ exact tag        ->  <tag>
 otherwise        ->  <number>-<label>.<counter>[.local][.dirty][+<key>.<value>...]
 
 baseline         =   highest numeric tag reachable from HEAD, else 0.0.0
-counter          =   commits reachable from HEAD
+counter          =   commits since the baseline tag, or the whole history before the first tag
 number           =   develop/<major>.<minor> branch  ->  that version, pinned
                      anything else                   ->  baseline with the patch advanced once
 label            =   versioning.label, "dev" by default
 ```
 
-The counter is the repository's own commit count, so the rows below assume the tag `1.1.1` sits on commit forty.
-
 | State                                                | Version                     |
 |------------------------------------------------------|-----------------------------|
 | on tag `1.1.1`                                       | `1.1.1`                     |
-| `master`, three commits later, in Actions run 24     | `1.1.2-dev.43+run.24`       |
-| `master`, nine commits later, in Actions run 25      | `1.1.2-dev.49+run.25`       |
-| `master`, three commits later, not pushed            | `1.1.2-dev.43.local`        |
-| `master`, three commits later, uncommitted changes   | `1.1.2-dev.43.local.dirty`  |
-| `develop/1.4`, seven commits later, in run 26        | `1.4.0-dev.47+run.26`       |
-| `develop/2.0`, seven commits later, in run 27        | `2.0.0-dev.47+run.27`       |
+| `master`, three commits later, in Actions run 24     | `1.1.2-dev.3+run.24`        |
+| `master`, nine commits later, in Actions run 25      | `1.1.2-dev.9+run.25`        |
+| `master`, three commits later, not pushed            | `1.1.2-dev.3.local`         |
+| `master`, three commits later, uncommitted changes   | `1.1.2-dev.3.local.dirty`   |
+| `develop/1.4`, seven commits later, in run 26        | `1.4.0-dev.7+run.26`        |
+| `develop/2.0`, seven commits later, in run 27        | `2.0.0-dev.7+run.27`        |
 | no tags yet, `master`, seven commits                 | `0.0.1-dev.7.local`         |
 
 ## Guarantees
 
 **The number only moves when a tag moves it.** Ten commits and one commit past `1.1.1` both read `1.1.2`, they differ in the label. Merging a branch back does not bump anything, it only advances the counter. The patch advances once off the baseline because those builds lead to the next patch, and it stays there until that patch is tagged.
 
-**Versions increase with every commit and never regress.** `1.1.1 < 1.1.2-dev.43 < 1.1.2-dev.49 < 1.1.2`. Under SemVer a pre-release sorts below the release it leads to, and Gradle's own comparator ranks `dev` the same way, so a development build is superseded by its release rather than outranking it.
+**Versions increase with every commit and never regress.** `1.1.1 < 1.1.2-dev.3 < 1.1.2-dev.9 < 1.1.2`. Under SemVer a pre-release sorts below the release it leads to, and Gradle's own comparator ranks `dev` the same way, so a development build is superseded by its release rather than outranking it.
 
-**The counter never goes backwards.** It counts the whole history rather than the distance from the baseline tag, because the baseline can move underneath a development line. Merge `develop/1.4` into `master`, cut `1.3.1` there, and back-merge: `1.3.1` is now the branch's baseline and sits ahead of most of its work, so a distance would restart the label somewhere it has already been. The commit count only grows, and a merge grows it by everything it brings in.
+**The counter is commits since the baseline tag.** A branch cut at `1.3.0` reads `dev.1` on its first commit and `dev.2` on its second, so the label says how far the line has come rather than how large the repository is. It only restarts when the baseline moves, which on a development branch means a tag was cut on top of work the branch already contains. Tag the version you merged rather than a patch on top of it and the branch is finished at that point anyway.
 
 **A version still does not identify a commit.** Two branches leading to the same number and holding the same commit count compute the same coordinate. What keeps a published coordinate apart is the `run` entry, which every build under GitHub Actions carries and no local build does. **Only builds carrying a run number may be published.** Anything built outside Actions is a local build and must not reach a repository.
 
@@ -160,7 +158,7 @@ versioning {
 }
 ```
 
-Under GitHub Actions the run number is emitted as `run` ahead of anything configured here, so the example above produces `1.1.2-dev.43+run.24.commit.a3f9c2`. Keys and values have to be SemVer identifiers, alphanumerics and hyphens. A leading zero is allowed there, because an abbreviated commit hash is occasionally all digits. The label may not carry one, and may not be a bare number.
+Under GitHub Actions the run number is emitted as `run` ahead of anything configured here, so the example above produces `1.1.2-dev.3+run.24.commit.a3f9c2`. Keys and values have to be SemVer identifiers, alphanumerics and hyphens. A leading zero is allowed there, because an abbreviated commit hash is occasionally all digits. The label may not carry one, and may not be a bare number.
 
 The extension exposes:
 
@@ -246,13 +244,13 @@ A tag build is validated before it publishes. The tag must be the highest numeri
 `com.cleanroommc:versioning` targets Java 21 and has no Gradle dependency.
 
 ```java
-// latest tag, branch target, commit count, on an exact tag, dirty, pushed
-GitState master = new GitState(SemanticVersion.parse("1.1.1"), null, 43, false, false, true);
+// latest tag, branch target, commits since the tag, dirty, pushed
+GitState master = new GitState(SemanticVersion.parse("1.1.1"), null, 3, false, true);
 
-Versioning.compute(master, "dev", Map.of());              // 1.1.2-dev.43
-Versioning.compute(master, "dev", Map.of("run", "24"));   // 1.1.2-dev.43+run.24
+Versioning.compute(master, "dev", Map.of());              // 1.1.2-dev.3
+Versioning.compute(master, "dev", Map.of("run", "24"));   // 1.1.2-dev.3+run.24
 
-GitState development = new GitState(SemanticVersion.parse("1.1.1"), SemanticVersion.parseTarget("1.4"), 47, false, false, true);
+GitState development = new GitState(SemanticVersion.parse("1.1.1"), SemanticVersion.parseTarget("1.4"), 7, false, true);
 
-Versioning.compute(development, "dev", Map.of());         // 1.4.0-dev.47
+Versioning.compute(development, "dev", Map.of());         // 1.4.0-dev.7
 ```
