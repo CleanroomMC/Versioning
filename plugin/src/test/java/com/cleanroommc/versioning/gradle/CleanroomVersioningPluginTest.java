@@ -245,19 +245,112 @@ class CleanroomVersioningPluginTest {
 
         git("switch", "-c", "feature/test");
         commit("feature");
-        assertVersion(run(githubPullRequest("feature/test", "80"), "-q", "printVersion"), "1.2.4-dev.2+run.80");
+        assertVersion(run(githubPullRequest("feature/test", "80"), "-q", "printVersion"), "1.2.4-feature-test.2+run.80");
     }
 
     @Test
-    void unknownBranchLeadsToTheNextPatch() throws Exception {
+    void unknownBranchLeadsToTheNextPatchUnderItsOwnLabel() throws Exception {
         initGit();
         commit("initial");
         tag("1.2.3");
         git("switch", "-c", "feature/test");
         commit("feature");
 
+        assertVersion(run("-q", "printVersion"), "1.2.4-feature-test.1.local");
+        assertVersion(run(githubBranch("feature/test", "83"), "-q", "printVersion"), "1.2.4-feature-test.1+run.83");
+    }
+
+    // Git records no parent branch, so the line the branch holds the fewest commits beyond is the one it was cut from.
+    @Test
+    void featureBranchInheritsTheDevelopmentLineItWasCutFrom() throws Exception {
+        initGit();
+        commit("initial");
+        tag("1.3.0");
+        setRemoteBranch("master");
+        git("switch", "-c", "develop/1.4");
+        commit("development");
+        setRemoteBranch("develop/1.4");
+        git("switch", "-c", "feature/foo");
+        commit("feature");
+        commit("more feature");
+
+        assertVersion(run(githubBranch("feature/foo", "24"), "-q", "printVersion"), "1.4.0-feature-foo.3+run.24");
+    }
+
+    // Both lines are one commit behind, and a tie belongs to the release line.
+    @Test
+    void featureBranchOffTheReleaseLineStaysOnIt() throws Exception {
+        initGit();
+        commit("initial");
+        tag("1.3.0");
+        git("switch", "-c", "develop/1.4");
+        commit("development");
+        setRemoteBranch("develop/1.4");
+        git("switch", "master");
+        setRemoteBranch("master");
+        git("switch", "-c", "fix/crash_on_load");
+        commit("fix");
+
+        assertVersion(run(githubBranch("fix/crash_on_load", "25"), "-q", "printVersion"),
+                "1.3.1-fix-crash-on-load.1+run.25");
+    }
+
+    // An inherited pin is a guess, so a released one is dropped rather than failing the way its own branch does.
+    @Test
+    void featureBranchDropsAnInheritedPinThatHasShipped() throws Exception {
+        initGit();
+        commit("initial");
+        tag("1.3.0");
+        setRemoteBranch("master");
+        git("switch", "-c", "develop/1.4");
+        commit("development");
+        setRemoteBranch("develop/1.4");
+        tag("1.4.0");
+        git("switch", "-c", "feature/foo");
+        commit("feature");
+
+        assertVersion(run("-q", "printVersion"), "1.4.1-feature-foo.1.local");
+    }
+
+    @Test
+    void aSiblingBranchNobodyCanBuildDoesNotBreakAFeatureBuild() throws Exception {
+        initGit();
+        commit("initial");
+        tag("1.3.0");
+        setRemoteBranch("master");
+        git("update-ref", "refs/remotes/origin/develop/foo", "master");
+        git("update-ref", "refs/remotes/origin/develop/1.4.3", "master");
+        git("switch", "-c", "feature/foo");
+        commit("feature");
+
+        assertVersion(run("-q", "printVersion"), "1.3.1-feature-foo.1.local");
+    }
+
+    @Test
+    void numericBranchFallsBackToTheDefaultLabel() throws Exception {
+        initGit();
+        commit("initial");
+        tag("1.2.3");
+        git("switch", "-c", "123");
+        commit("work");
+
         assertVersion(run("-q", "printVersion"), "1.2.4-dev.1.local");
-        assertVersion(run(githubBranch("feature/test", "83"), "-q", "printVersion"), "1.2.4-dev.1+run.83");
+    }
+
+    @Test
+    void configuredLabelBeatsTheBranchName() throws Exception {
+        writeBuild("""
+                versioning {
+                    label = 'nightly'
+                }
+                """);
+        initGit();
+        commit("initial");
+        tag("1.2.3");
+        git("switch", "-c", "feature/foo");
+        commit("feature");
+
+        assertVersion(run("-q", "printVersion"), "1.2.4-nightly.1.local");
     }
 
     @Test
@@ -267,7 +360,7 @@ class CleanroomVersioningPluginTest {
         git("switch", "-c", "feature/test");
         commit("feature");
 
-        assertVersion(run(githubBranch("feature/test", "84"), "-q", "printVersion"), "0.0.1-dev.2+run.84");
+        assertVersion(run(githubBranch("feature/test", "84"), "-q", "printVersion"), "0.0.1-feature-test.2+run.84");
     }
 
     @Test

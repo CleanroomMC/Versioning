@@ -43,7 +43,8 @@ public abstract class CleanroomVersioningPlugin implements Plugin<Project> {
         // which freezes the configuration before a build script can set it
         extension.getReleaseBranch().convention(providers.gradleProperty("versioning.releaseBranch").orElse("master"));
         extension.getDevelopmentPrefix().convention(providers.gradleProperty("versioning.developmentPrefix").orElse("develop"));
-        extension.getLabel().convention(providers.gradleProperty("versioning.label").orElse("dev"));
+        // No default: an unset label is derived from the branch by the value source
+        extension.getLabel().convention(providers.gradleProperty("versioning.label"));
         extension.getReleaseBranch().finalizeValueOnRead();
         extension.getDevelopmentPrefix().finalizeValueOnRead();
         extension.getLabel().finalizeValueOnRead();

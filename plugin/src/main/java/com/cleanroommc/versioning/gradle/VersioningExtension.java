@@ -38,7 +38,8 @@ public abstract class VersioningExtension {
     public abstract Property<String> getDevelopmentPrefix();
 
     /**
-     * The pre-release label commits are counted under, {@code dev} by default.
+     * The pre-release label commits are counted under. Unset it is {@code dev} on the release branch and on a
+     * development branch, and the branch name elsewhere, so {@code feature/foo} counts under {@code feature-foo}.
      *
      * @return the label
      */

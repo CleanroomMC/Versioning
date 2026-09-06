@@ -27,20 +27,24 @@ otherwise        ->  <number>-<label>.<counter>[.local][.dirty][+<key>.<value>..
 baseline         =   highest numeric tag reachable from HEAD, else 0.0.0
 counter          =   commits since the baseline tag, or the whole history before the first tag
 number           =   develop/<major>.<minor> branch  ->  that version, pinned
-                     anything else                   ->  baseline with the patch advanced once
-label            =   versioning.label, "dev" by default
+                     release branch                  ->  baseline with the patch advanced once
+                     anything else                   ->  the line the branch was cut from
+label            =   versioning.label, else "dev" on the release and development branches,
+                     else the branch name
 ```
 
-| State                                                | Version                     |
-|------------------------------------------------------|-----------------------------|
-| on tag `1.1.1`                                       | `1.1.1`                     |
-| `master`, three commits later, in Actions run 24     | `1.1.2-dev.3+run.24`        |
-| `master`, nine commits later, in Actions run 25      | `1.1.2-dev.9+run.25`        |
-| `master`, three commits later, not pushed            | `1.1.2-dev.3.local`         |
-| `master`, three commits later, uncommitted changes   | `1.1.2-dev.3.local.dirty`   |
-| `develop/1.4`, seven commits later, in run 26        | `1.4.0-dev.7+run.26`        |
-| `develop/2.0`, seven commits later, in run 27        | `2.0.0-dev.7+run.27`        |
-| no tags yet, `master`, seven commits                 | `0.0.1-dev.7.local`         |
+| State                                                  | Version                      |
+|--------------------------------------------------------|------------------------------|
+| on tag `1.1.1`                                         | `1.1.1`                      |
+| `master`, three commits later, in Actions run 24       | `1.1.2-dev.3+run.24`         |
+| `master`, nine commits later, in Actions run 25        | `1.1.2-dev.9+run.25`         |
+| `master`, three commits later, not pushed              | `1.1.2-dev.3.local`          |
+| `master`, three commits later, uncommitted changes     | `1.1.2-dev.3.local.dirty`    |
+| `develop/1.4`, seven commits later, in run 26          | `1.4.0-dev.7+run.26`         |
+| `develop/2.0`, seven commits later, in run 27          | `2.0.0-dev.7+run.27`         |
+| `feature/foo` off `develop/1.4`, three commits, run 28 | `1.4.0-feature-foo.3+run.28` |
+| `fix/crash` off `master`, one commit, in run 29        | `1.1.2-fix-crash.1+run.29`   |
+| no tags yet, `master`, seven commits                   | `0.0.1-dev.7.local`          |
 
 ## Guarantees
 
@@ -49,6 +53,8 @@ label            =   versioning.label, "dev" by default
 **Versions increase with every commit and never regress.** `1.1.1 < 1.1.2-dev.3 < 1.1.2-dev.9 < 1.1.2`. Under SemVer a pre-release sorts below the release it leads to, and Gradle's own comparator ranks `dev` the same way, so a development build is superseded by its release rather than outranking it.
 
 **The counter is commits since the baseline tag.** A branch cut at `1.3.0` reads `dev.1` on its first commit and `dev.2` on its second, so the label says how far the line has come rather than how large the repository is. It only restarts when the baseline moves, which on a development branch means a tag was cut on top of work the branch already contains. Tag the version you merged rather than a patch on top of it and the branch is finished at that point anyway.
+
+**Working branch ordering depends on the label.** For the same numeric version, `feature-foo` and `fix-crash` sort above `dev`, while `chore-cleanup` sorts below it. SemVer compares these labels in ASCII order before comparing the counter, so `1.4.0-feature-foo.3` sorts above `1.4.0-dev.9`. Working branches are never published.
 
 **A version still does not identify a commit.** Two branches leading to the same number and holding the same commit count compute the same coordinate. What keeps a published coordinate apart is the `run` entry, which every build under GitHub Actions carries and no local build does. **Only builds carrying a run number may be published.** Anything built outside Actions is a local build and must not reach a repository.
 
@@ -70,7 +76,11 @@ Rewritten history and deleted tags need no special handling. Every build recompu
 
 A branch named `develop/<major>.<minor>` is a development line pinned to the version it leads to. It stays on that number for its whole life and only the label counter moves. Any number of them can run at once, so a long horizon major can be developed on `develop/2.0` while the next minor is built on `develop/1.4`, with `master` still shipping `1.3.x` fixes in between.
 
-`develop/1.4` and `develop/1.4.0` both mean `1.4.0`, and a `v` prefix is accepted. A non-zero patch such as `develop/1.4.3` fails the build, patch versions are cut on the release branch rather than developed towards. Any branch that does not match the prefix, `feature/foo` and `master` included, follows the release rule.
+`develop/1.4` and `develop/1.4.0` both mean `1.4.0`, and a `v` prefix is accepted. A non-zero patch such as `develop/1.4.3` fails the build, patch versions are cut on the release branch rather than developed towards.
+
+Every other branch, `feature/foo` and `fix/crash` included, is a working branch. It follows the line it was cut from and counts its commits under a label of its own, so `feature/foo` cut from `develop/1.4` reads `1.4.0-feature-foo.3` while the same branch cut from `master` reads `1.3.1-feature-foo.3`. The label is the branch name with everything outside `[0-9A-Za-z-]` replaced by a hyphen, so `fix/crash_on_load` counts under `fix-crash-on-load`. A name that sanitises to nothing, or to digits alone, falls back to `dev`. Setting `versioning.label` replaces the derived name.
+
+Git records no parent branch, so the line is worked out from the remote refs. Whichever of `origin/<releaseBranch>` and `origin/<developmentPrefix>/*` the branch holds the fewest commits beyond is the line it came from, and the release branch takes a tie. Where the release branch wins, or nothing is there to compare against, the release rule applies as before. The answer is a guess and merges in both directions can move it, so it is only ever advisory: an inherited number that a tag has already reached is dropped and the branch falls back to the release rule, rather than failing the build the way `develop/1.4` itself would. A sibling ref that cannot be read as a target, `origin/develop/foo` or `origin/develop/1.4.3`, is skipped. Only the branch you are standing on has to be named correctly.
 
 A development branch has to lead somewhere the tags have not already reached. Once `1.4.0` is tagged and merged back, `develop/1.4` would compute `1.4.0-dev.N`, which sits below the release it just shipped, so the build fails and asks for the branch to be retargeted or deleted. That is the point at which the branch has done its job.
 
@@ -203,6 +213,8 @@ jobs:
     if: needs.guard.outputs.skip != 'true'
 ```
 
+Working branches build and are never published. The gate below already excludes them, since it tests for `refs/heads/develop/`.
+
 A workflow that publishes development builds has to check that it is holding a development version. Branching at a release tag, `develop/1.4` created on `1.3.0` for instance, computes the bare `1.3.0`, and publishing that from a branch push would overwrite the release. A bare version is only ever produced on an exact tag, so gating on a pre-release is enough:
 
 ```yaml
@@ -218,7 +230,7 @@ A workflow that publishes development builds has to check that it is holding a d
   run: ./gradlew publish
 ```
 
-Checkouts need full history and tags:
+Checkouts need full history and tags. The full fetch also brings every `origin/*` branch ref, which is what a working branch's line is worked out from:
 
 ```yaml
 - uses: actions/checkout@v7
