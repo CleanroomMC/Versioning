@@ -18,7 +18,30 @@ permissions:
   contents: read
 
 jobs:
+  # A merge into the release branch sits between the merge and the release tag, so it computes the next patch of the
+  # previous tag, a number that will never ship. Development branches pin their number, so their merges are left alone
+  # and still publish.
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - id: check
+        run: |
+          parents=$(git rev-list --parents -n 1 HEAD | wc -w)
+          if [ "$parents" -gt 2 ] && [ "$GITHUB_REF" = 'refs/heads/master' ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: guard
+    if: needs.guard.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

@@ -241,7 +241,7 @@ class CleanroomVersioningPluginTest {
         tag("1.2.3");
         commit("hotfix");
 
-        assertVersion(run(githubBranch("master", "78"), "-q", "printVersion"), "1.2.4-dev.2.run.78");
+        assertVersion(run(githubBranch("master", "78"), "-q", "printVersion"), "1.2.4-dev.2+run.78");
     }
 
     @Test
@@ -252,7 +252,7 @@ class CleanroomVersioningPluginTest {
         git("switch", "-c", "develop/1.4");
         commit("development");
 
-        assertVersion(run(githubBranch("develop/1.4", "77"), "-q", "printVersion"), "1.4.0-dev.2.run.77");
+        assertVersion(run(githubBranch("develop/1.4", "77"), "-q", "printVersion"), "1.4.0-dev.2+run.77");
     }
 
     // The head ref is the branch the pull request builds, whatever it targets.
@@ -264,11 +264,11 @@ class CleanroomVersioningPluginTest {
         git("switch", "-c", "develop/1.4");
         commit("development");
 
-        assertVersion(run(githubPullRequest("develop/1.4", "79"), "-q", "printVersion"), "1.4.0-dev.2.run.79");
+        assertVersion(run(githubPullRequest("develop/1.4", "79"), "-q", "printVersion"), "1.4.0-dev.2+run.79");
 
         git("switch", "-c", "feature/test");
         commit("feature");
-        assertVersion(run(githubPullRequest("feature/test", "80"), "-q", "printVersion"), "1.2.4-dev.3.run.80");
+        assertVersion(run(githubPullRequest("feature/test", "80"), "-q", "printVersion"), "1.2.4-dev.3+run.80");
     }
 
     @Test
@@ -280,7 +280,7 @@ class CleanroomVersioningPluginTest {
         commit("feature");
 
         assertVersion(run("-q", "printVersion"), "1.2.4-dev.2.local");
-        assertVersion(run(githubBranch("feature/test", "83"), "-q", "printVersion"), "1.2.4-dev.2.run.83");
+        assertVersion(run(githubBranch("feature/test", "83"), "-q", "printVersion"), "1.2.4-dev.2+run.83");
     }
 
     @Test
@@ -290,7 +290,7 @@ class CleanroomVersioningPluginTest {
         git("switch", "-c", "feature/test");
         commit("feature");
 
-        assertVersion(run(githubBranch("feature/test", "84"), "-q", "printVersion"), "0.0.1-dev.2.run.84");
+        assertVersion(run(githubBranch("feature/test", "84"), "-q", "printVersion"), "0.0.1-dev.2+run.84");
     }
 
     @Test
@@ -337,8 +337,8 @@ class CleanroomVersioningPluginTest {
         tag("1.2.3");
         commit("ahead");
 
-        assertVersion(run(githubBranch("master", "90"), "-q", "printVersion"), "1.2.4-dev.2.run.90.commit.a3f9c2");
-        assertVersion(run("-q", "printVersion"), "1.2.4-dev.2.commit.a3f9c2.local");
+        assertVersion(run(githubBranch("master", "90"), "-q", "printVersion"), "1.2.4-dev.2+run.90.commit.a3f9c2");
+        assertVersion(run("-q", "printVersion"), "1.2.4-dev.2.local+commit.a3f9c2");
     }
 
     // The run number is not part of the property, so assigning the map outright cannot drop it.
@@ -354,7 +354,7 @@ class CleanroomVersioningPluginTest {
         tag("1.2.3");
         commit("ahead");
 
-        assertVersion(run(githubBranch("master", "91"), "-q", "printVersion"), "1.2.4-dev.2.run.91.commit.a3f9c2");
+        assertVersion(run(githubBranch("master", "91"), "-q", "printVersion"), "1.2.4-dev.2+run.91.commit.a3f9c2");
     }
 
     @Test

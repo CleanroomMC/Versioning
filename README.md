@@ -22,7 +22,7 @@ The highest numeric tag reachable from `HEAD` is the baseline. Only a tag moves 
 
 ```text
 exact tag        ->  <tag>
-otherwise        ->  <number>-<label>.<counter>[.<key>.<value>]*[.local][.dirty]
+otherwise        ->  <number>-<label>.<counter>[.local][.dirty][+<key>.<value>...]
 
 baseline         =   highest numeric tag reachable from HEAD, else 0.0.0
 counter          =   commits reachable from HEAD
@@ -36,12 +36,12 @@ The counter is the repository's own commit count, so the rows below assume the t
 | State                                                | Version                     |
 |------------------------------------------------------|-----------------------------|
 | on tag `1.1.1`                                       | `1.1.1`                     |
-| `master`, three commits later, in Actions run 24     | `1.1.2-dev.43.run.24`       |
-| `master`, nine commits later, in Actions run 25      | `1.1.2-dev.49.run.25`       |
+| `master`, three commits later, in Actions run 24     | `1.1.2-dev.43+run.24`       |
+| `master`, nine commits later, in Actions run 25      | `1.1.2-dev.49+run.25`       |
 | `master`, three commits later, not pushed            | `1.1.2-dev.43.local`        |
 | `master`, three commits later, uncommitted changes   | `1.1.2-dev.43.local.dirty`  |
-| `develop/1.4`, seven commits later, in run 26        | `1.4.0-dev.47.run.26`       |
-| `develop/2.0`, seven commits later, in run 27        | `2.0.0-dev.47.run.27`       |
+| `develop/1.4`, seven commits later, in run 26        | `1.4.0-dev.47+run.26`       |
+| `develop/2.0`, seven commits later, in run 27        | `2.0.0-dev.47+run.27`       |
 | no tags yet, `master`, seven commits                 | `0.0.1-dev.7.local`         |
 
 ## Guarantees
@@ -53,6 +53,8 @@ The counter is the repository's own commit count, so the rows below assume the t
 **The counter never goes backwards.** It counts the whole history rather than the distance from the baseline tag, because the baseline can move underneath a development line. Merge `develop/1.4` into `master`, cut `1.3.1` there, and back-merge: `1.3.1` is now the branch's baseline and sits ahead of most of its work, so a distance would restart the label somewhere it has already been. The commit count only grows, and a merge grows it by everything it brings in.
 
 **A version still does not identify a commit.** Two branches leading to the same number and holding the same commit count compute the same coordinate. What keeps a published coordinate apart is the `run` entry, which every build under GitHub Actions carries and no local build does. **Only builds carrying a run number may be published.** Anything built outside Actions is a local build and must not reach a repository.
+
+Metadata sits after `+`, so SemVer ignores it for precedence: two runs of the same commit are distinct coordinates that rank equally. That is the point of putting it there. Ordering is the label's job and identity is metadata's, and mixing the two would let a commit hash decide which build is newer.
 
 `.local` and `.dirty` are appended last so the orderable part of the label stays contiguous. That does mean a local build of a commit outranks the CI build of the same commit, which is harmless because a local build must never be published.
 
@@ -149,7 +151,7 @@ versioning.releaseBranch = main
 > [!IMPORTANT]
 > Use the Gradle properties when the build also applies `java-gradle-plugin`. That plugin reads `project.version` while the `plugins` block is still running, which is before a build script can configure the extension, so the extension values would arrive too late.
 
-`metadata` adds identifiers of your own after the label, in the order you put them:
+`metadata` adds build metadata of your own after `+`, in the order you put them:
 
 ```groovy
 versioning {
@@ -158,7 +160,7 @@ versioning {
 }
 ```
 
-Under GitHub Actions the run number is emitted as `run` ahead of anything configured here, so the example above produces `1.1.2-dev.3.run.24.commit.a3f9c2`. Keys and values have to be SemVer identifiers, alphanumerics and hyphens with no leading zero on a number, and the label additionally may not be a bare number.
+Under GitHub Actions the run number is emitted as `run` ahead of anything configured here, so the example above produces `1.1.2-dev.43+run.24.commit.a3f9c2`. Keys and values have to be SemVer identifiers, alphanumerics and hyphens. A leading zero is allowed there, because an abbreviated commit hash is occasionally all digits. The label may not carry one, and may not be a bare number.
 
 The extension exposes:
 
@@ -166,7 +168,7 @@ The extension exposes:
 versioning.version           // Provider<String>, also project.version
 versioning.stage             // Property<Stage>, settable from a Stage or its name
 versioning.label             // Property<String>, settable
-versioning.metadata          // MapProperty<String, String>, settable
+versioning.metadata          // MapProperty<String, String>, settable, emitted after +
 versioning.developmentPrefix // Property<String>, settable
 versioning.releaseBranch     // Property<String>, settable
 ```
@@ -176,6 +178,32 @@ versioning.releaseBranch     // Property<String>, settable
 ## GitHub Actions
 
 Builds under GitHub Actions are treated as pushed and carry the run number, except on a tag. Builds outside Actions carry no run number and must not be published. A pull request is versioned as the branch it comes from, not the one it targets.
+
+A merge into the release branch is worth skipping. It sits between the merge and the release tag, so it computes the next patch of the previous tag, a number that will never ship. Development branches pin their number, so their merges are correct and should still build:
+
+```yaml
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - id: check
+        run: |
+          parents=$(git rev-list --parents -n 1 HEAD | wc -w)
+          if [ "$parents" -gt 2 ] && [ "$GITHUB_REF" = 'refs/heads/master' ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: guard
+    if: needs.guard.outputs.skip != 'true'
+```
 
 A workflow that publishes development builds has to check that it is holding a development version. Branching at a release tag, `develop/1.4` created on `1.3.0` for instance, computes the bare `1.3.0`, and publishing that from a branch push would overwrite the release. A bare version is only ever produced on an exact tag, so gating on a pre-release is enough:
 
@@ -222,7 +250,7 @@ A tag build is validated before it publishes. The tag must be the highest numeri
 GitState master = new GitState(SemanticVersion.parse("1.1.1"), null, 43, false, false, true);
 
 Versioning.compute(master, "dev", Map.of());              // 1.1.2-dev.43
-Versioning.compute(master, "dev", Map.of("run", "24"));   // 1.1.2-dev.43.run.24
+Versioning.compute(master, "dev", Map.of("run", "24"));   // 1.1.2-dev.43+run.24
 
 GitState development = new GitState(SemanticVersion.parse("1.1.1"), SemanticVersion.parseTarget("1.4"), 47, false, false, true);
 

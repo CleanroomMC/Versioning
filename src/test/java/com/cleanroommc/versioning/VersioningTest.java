@@ -50,7 +50,7 @@ class VersioningTest {
         var metadata = new LinkedHashMap<String, String>();
         metadata.put("run", "24");
         metadata.put("commit", "a3f9c2");
-        assertEquals("1.1.2-dev.1.run.24.commit.a3f9c2",
+        assertEquals("1.1.2-dev.1+run.24.commit.a3f9c2",
                 Versioning.compute(state("1.1.1", null, 1, false, true), "dev", metadata));
     }
 
@@ -69,9 +69,10 @@ class VersioningTest {
         assertEquals("1.1.2-dev.3.local", Versioning.compute(state("1.1.1", null, 3, false, false), "dev", Map.of()));
     }
 
+    // The markers stay in the pre-release, where they lower precedence; metadata does not belong there.
     @Test
-    void dirtyWorktreeIsMarkedLocalAndDirtyAfterTheMetadata() {
-        assertEquals("1.1.2-dev.3.run.24.local.dirty",
+    void dirtyWorktreeIsMarkedLocalAndDirtyBeforeTheMetadata() {
+        assertEquals("1.1.2-dev.3.local.dirty+run.24",
                 Versioning.compute(state("1.1.1", null, 3, true, true), "dev", Map.of("run", "24")));
     }
 
@@ -96,8 +97,15 @@ class VersioningTest {
         assertEquals("versioning.label must not be numeric (got '1')", exception.getMessage());
     }
 
+    // An abbreviated commit hash is occasionally all digits, and build metadata is where a leading zero is legal.
+    @Test
+    void metadataAcceptsALeadingZero() {
+        assertEquals("1.1.2-dev.3+commit.0123456",
+                Versioning.compute(state("1.1.1", null, 3, false, true), "dev", Map.of("commit", "0123456")));
+    }
+
     @ParameterizedTest
-    @CsvSource({"run number, 24", "run, 0024", "run, a3f9 c2"})
+    @CsvSource({"run number, 24", "run, a3f9 c2"})
     void invalidMetadataIsRejected(String key, String value) {
         assertThrows(IllegalArgumentException.class,
                 () -> Versioning.compute(state("1.1.1", null, 3, false, true), "dev", Map.of(key, value)));
