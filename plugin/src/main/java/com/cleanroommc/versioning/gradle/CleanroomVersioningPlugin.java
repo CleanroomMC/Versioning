@@ -1,6 +1,5 @@
 package com.cleanroommc.versioning.gradle;
 
-import com.cleanroommc.versioning.SemanticVersion;
 import com.cleanroommc.versioning.Stage;
 import org.gradle.api.GradleException;
 import org.gradle.api.Plugin;
@@ -49,12 +48,18 @@ public abstract class CleanroomVersioningPlugin implements Plugin<Project> {
         extension.getDevelopmentPrefix().finalizeValueOnRead();
         extension.getLabel().finalizeValueOnRead();
 
+        Provider<String> releaseTag = providers.environmentVariable("GITHUB_ACTIONS").orElse("")
+                .zip(providers.environmentVariable("GITHUB_REF_TYPE").orElse(""),
+                        (actions, type) -> "true".equalsIgnoreCase(actions) && "tag".equals(type))
+                .zip(providers.environmentVariable("GITHUB_REF_NAME").orElse(""),
+                        (tagBuild, name) -> tagBuild ? name : "");
         Provider<GitSnapshot> snapshot = project.getGradle().getSharedServices()
                 .registerIfAbsent(GitSnapshotService.NAME, GitSnapshotService.class)
                 .get()
                 .snapshot(project.getProjectDir(), () -> providers.of(GitSnapshotValueSource.class, spec -> {
                     var parameters = spec.getParameters();
                     parameters.getRepositoryDirectory().set(project.getLayout().getProjectDirectory());
+                    parameters.getReleaseTag().set(releaseTag);
                 }));
 
         // Merged rather than left to a convention
@@ -67,8 +72,11 @@ public abstract class CleanroomVersioningPlugin implements Plugin<Project> {
                     return merged;
                 });
 
+        if (providers.gradleProperty("versioning.stage").isPresent()) {
+            project.getLogger().warn(VersioningExtension.STAGE_DEPRECATION);
+        }
         extension.getStage().convention(providers.gradleProperty("versioning.stage").map(Stage::parse)
-                .orElse(snapshot.map(state -> defaultStage(state.latestTag()))));
+                .orElse(snapshot.map(GitSnapshot::stage)));
         extension.getStage().finalizeValueOnRead();
 
         extension.getVersion().set(providers.of(ComputedVersionValueSource.class, spec -> {
@@ -80,6 +88,7 @@ public abstract class CleanroomVersioningPlugin implements Plugin<Project> {
             parameters.getLabel().set(extension.getLabel());
             parameters.getMetadata().set(metadata);
             parameters.getStage().set(extension.getStage());
+            parameters.getReplaceRelease().set(providers.gradleProperty("versioning.replaceRelease").map(Boolean::parseBoolean).orElse(false));
             parameters.getGithubActions().set(providers.environmentVariable("GITHUB_ACTIONS").orElse(""));
             parameters.getGithubRefType().set(providers.environmentVariable("GITHUB_REF_TYPE").orElse(""));
             parameters.getGithubRefName().set(providers.environmentVariable("GITHUB_REF_NAME").orElse(""));
@@ -99,10 +108,6 @@ public abstract class CleanroomVersioningPlugin implements Plugin<Project> {
             task.setDescription("Prints the computed project version.");
             task.getVersion().set(extension.getVersion());
         });
-    }
-
-    private static Stage defaultStage(SemanticVersion latestTag) {
-        return latestTag == null || latestTag.major() == 0 ? Stage.BETA : Stage.RELEASE;
     }
 
 }

@@ -68,6 +68,11 @@ public abstract class ComputedVersionValueSource implements ValueSource<String, 
         Property<Stage> getStage();
 
         /**
+         * @return whether a tag build may publish a version another tag already names
+         */
+        Property<Boolean> getReplaceRelease();
+
+        /**
          * @return the {@code GITHUB_ACTIONS} environment variable
          */
         Property<String> getGithubActions();
@@ -109,7 +114,8 @@ public abstract class ComputedVersionValueSource implements ValueSource<String, 
 
         boolean tagBuild = githubActions && "tag".equals(parameters.getGithubRefType().get());
         if (tagBuild) {
-            validateRelease(snapshot, releaseBranch, parameters.getGithubRefName().get());
+            validateRelease(snapshot, releaseBranch, parameters.getGithubRefName().get(),
+                    parameters.getReplaceRelease().get());
         }
 
         String branch = tagBuild ? "" : branch(snapshot, githubActions, parameters.getGithubRefName().get(),
@@ -181,19 +187,24 @@ public abstract class ComputedVersionValueSource implements ValueSource<String, 
         return label.isEmpty() || label.chars().allMatch(Character::isDigit) ? DEFAULT_LABEL : label;
     }
 
-    private void validateRelease(GitSnapshot snapshot, String releaseBranch, String refName) {
-        SemanticVersion tag;
-        try {
-            tag = SemanticVersion.parse(refName);
-        } catch (RuntimeException e) {
-            throw new GradleException("GitHub tag ref must be numeric SemVer in the form <major>.<minor>.<patch> or v<major>.<minor>.<patch> (got '"
-                    + refName + "')", e);
-        }
-        if (!tag.equals(snapshot.latestTag()) || !snapshot.exactTag()) {
-            throw new GradleException("GitHub tag '" + refName + "' must be the highest reachable numeric tag at HEAD");
-        }
+    private void validateRelease(GitSnapshot snapshot, String releaseBranch, String refName, boolean replace) {
         if (snapshot.dirty()) {
             throw new GradleException("Release build requires a clean Git worktree");
+        }
+        // Stage suffixes never reach the version, so another tag with the same number was already published
+        if (!replace) {
+            for (String name : gitOutput("tag", "--list").split("\\R")) {
+                GitTag tag;
+                try {
+                    tag = GitTag.parse(name);
+                } catch (IllegalArgumentException e) {
+                    continue;
+                }
+                if (!name.equals(refName) && tag.version().equals(snapshot.latestTag())) {
+                    throw new GradleException("Release tag '" + refName + "' publishes " + snapshot.latestTag()
+                            + ", which tag '" + name + "' already published. Pass -Pversioning.replaceRelease=true to replace it");
+                }
+            }
         }
         // Asked for here rather than carried on the snapshot: the snapshot is shared by every project in the
         // repository, and the release branch is a per-project setting. Only a tag build ever needs the answer.

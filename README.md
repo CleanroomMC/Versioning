@@ -1,30 +1,32 @@
 # Cleanroom Versioning
 
 `git tag`-native SemVer for Gradle.
-Git tags are the single source of truth for the number.
+Git tags set the number and the default stage.
 Commits between tags advance an ordered pre-release label instead of the number.
 
 ## Policy
 
-Tags are strict SemVer, with or without a `v` prefix, and they carry every numeric component:
+Tags carry every numeric component, with an optional `v` prefix and stage suffix:
 
 ```text
-0.1.0
+0.1.0-alpha
 v0.2.0
-1.0.0
+1.0.0-release
 1.1.1
 ```
 
 Both forms are read the same way and the prefix never reaches the computed version, a tag `v1.2.0` would produce version `1.2.0`.
+Stage suffixes set `versioning.stage` and are also stripped from the computed version. `0.4.2-alpha` produces version `0.4.2` with stage `alpha`.
 Pick one form and stay with it even though the two are interchangeable, mixing them makes a tag list harder to read.
 
-The highest numeric tag reachable from `HEAD` is the baseline. Only a tag moves the number. Everything else moves the label.
+The highest numeric tag reachable from `HEAD` is the baseline for branch and local builds. A GitHub tag build uses the tag that triggered it, even when a higher version is reachable. This lets older maintenance versions publish independently. Only a tag moves the number. Everything else moves the label.
 
 ```text
 exact tag        ->  <tag>
 otherwise        ->  <number>-<label>.<counter>[.local][.dirty][+<key>.<value>...]
 
-baseline         =   highest numeric tag reachable from HEAD, else 0.0.0
+baseline         =   triggering tag for a GitHub tag build,
+                     otherwise highest numeric tag reachable from HEAD, else 0.0.0
 counter          =   commits since the baseline tag, or the whole history before the first tag
 number           =   develop/<major>.<minor> branch  ->  that version, pinned
                      release branch                  ->  baseline with the patch advanced once
@@ -121,16 +123,25 @@ pluginManagement {
 
 Do not declare `version` in `gradle.properties` or the build script. The plugin assigns `project.version` from Git and fails the build if a version is already set.
 
-Stage is an independent marker for upload sites and archive names, one of `alpha`, `beta`, `rc`, `release`. Anything else fails the build. It is optional. Left unset it is `beta` while the version line is below `1.0.0` and `release` from there on. It never reaches the version, the plugin only resolves it so a bad name fails the build early.
+Stage is an independent marker for upload sites and archive names, one of `alpha`, `beta`, `rc`, `release`. A tag can assign it with a case-insensitive suffix such as `0.4.2-alpha` or `v1.0.0-release`.
 
-It is a `Property<Stage>`, and the plugin jar carries the enum, so a build script can name it either way and branch on it without comparing strings:
+By default, a GitHub tag build uses the stage written in its triggering tag. A bare tag inherits from the highest reachable staged version at or below its own version, within the same major version. Given `0.4.9-beta` and `0.5.0-alpha`, tag builds for `0.4.12` inherit `beta` and tag builds for `0.5.1` inherit `alpha`, regardless of push order. After `0.4.2-alpha`, a tag `0.5.0` still inherits `alpha`. A `-release` suffix switches the stage to `release`.
+
+Each major version starts over. After `0.4.2-alpha`, a bare `1.0.0` does not inherit `alpha`. Without an eligible stage tag in its major version, the stage is `beta` below `1.0.0` and `release` from there on. A new major version still in pre-release says so on its first tag, such as `2.0.0-alpha`.
+
+Branch and local builds inherit the same way, from the major version of their baseline.
+
+When inheritance has several stage tags with the same numeric version, stages advance in the order `alpha`, `beta`, `rc`, `release`. An explicit stage on the triggering tag takes precedence. For branch and local builds, the nearest tag with the highest numeric version supplies the commit counter. Stage suffixes never enter the computed version, so tags that differ only by stage produce the same artifact coordinate.
+
+Tags with unsupported suffixes are ignored during discovery and rejected as GitHub release tags.
+
+> [!WARNING]
+> Setting the stage from Gradle, through the extension or the `versioning.stage` property, is deprecated and will be removed in the next major version. It still overrides Git for now and logs a warning.
+
+Read it as a `Provider<Stage>`. The plugin jar carries the enum, so a build script can branch on it without comparing strings:
 
 ```groovy
 import com.cleanroommc.versioning.Stage
-
-versioning {
-    stage = Stage.ALPHA  // 'alpha' works too, case insensitively
-}
 
 publishing.repositories.maven {
     url = versioning.stage.map { it == Stage.RELEASE ? releasesUrl : snapshotsUrl }
@@ -139,18 +150,16 @@ publishing.repositories.maven {
 
 ```groovy
 versioning {
-    stage = 'alpha'
     label = 'nightly'
     developmentPrefix = 'next'
     releaseBranch = 'main'
 }
 ```
 
-The same four settings are available as Gradle properties:
+The same three settings are available as Gradle properties:
 
 ```properties
 # gradle.properties
-versioning.stage = alpha
 versioning.label = nightly
 versioning.developmentPrefix = next
 versioning.releaseBranch = main
@@ -174,7 +183,7 @@ The extension exposes:
 
 ```groovy
 versioning.version           // Provider<String>, also project.version
-versioning.stage             // Property<Stage>, settable from a Stage or its name
+versioning.stage             // Property<Stage>, read from Git tags, setting it is deprecated
 versioning.label             // Property<String>, settable
 versioning.metadata          // MapProperty<String, String>, settable, emitted after +
 versioning.developmentPrefix // Property<String>, settable
@@ -239,7 +248,7 @@ Checkouts need full history and tags. The full fetch also brings every `origin/*
     fetch-tags: true
 ```
 
-Tag triggers need both forms if the repository uses both:
+Tag triggers can include both prefixes and stage suffixes:
 
 ```yaml
 on:
@@ -247,9 +256,13 @@ on:
     tags:
       - '[0-9]+.[0-9]+.[0-9]+'
       - 'v[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+-*'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
 ```
 
-A tag build is validated before it publishes. The tag must be the highest numeric tag reachable from `HEAD`, the worktree must be clean, and the commit must be reachable from `origin/<releaseBranch>`. When that remote ref does not exist the reachability check is skipped, so a repository that does not use it can still release.
+A tag build is validated before it publishes. The triggering tag must exist and point to `HEAD`, the worktree must be clean, and the commit must be reachable from `origin/<releaseBranch>`. Higher reachable versions do not block publication. When that remote ref does not exist the reachability check is skipped, so a repository that does not use it can still release.
+
+A tag build also fails when any other tag names the same number, because stage suffixes never reach the version. Tagging `0.5.0-release` after `0.5.0-alpha` would publish `0.5.0` a second time. Pass `-Pversioning.replaceRelease=true` to that one build to publish anyway. The repository still decides whether it accepts the replacement, and the Gradle Plugin Portal rejects it.
 
 ## Core API
 

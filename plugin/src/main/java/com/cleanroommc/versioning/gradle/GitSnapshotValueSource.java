@@ -1,8 +1,10 @@
 package com.cleanroommc.versioning.gradle;
 
 import com.cleanroommc.versioning.SemanticVersion;
+import com.cleanroommc.versioning.Stage;
 import org.gradle.api.GradleException;
 import org.gradle.api.file.DirectoryProperty;
+import org.gradle.api.provider.Property;
 import org.gradle.api.provider.ValueSource;
 import org.gradle.api.provider.ValueSourceParameters;
 import org.gradle.process.ExecOperations;
@@ -14,6 +16,7 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -31,6 +34,11 @@ public abstract class GitSnapshotValueSource implements ValueSource<GitSnapshot,
          */
         DirectoryProperty getRepositoryDirectory();
 
+        /**
+         * @return the tag selected by CI, empty for branch and local builds
+         */
+        Property<String> getReleaseTag();
+
     }
 
     /**
@@ -45,15 +53,65 @@ public abstract class GitSnapshotValueSource implements ValueSource<GitSnapshot,
         if (!repository.success() || !"true".equals(repository.output())) {
             throw new GradleException("Cleanroom Versioning requires a Git repository");
         }
-        if (!git("rev-parse", "--verify", "HEAD^{commit}").success()) {
+        CommandResult head = git("rev-parse", "--verify", "HEAD^{commit}");
+        if (!head.success()) {
             throw new GradleException("Cleanroom Versioning requires at least one Git commit");
         }
 
         boolean dirty = !require("status", "--porcelain", "--untracked-files=normal").isEmpty();
         boolean shallow = Boolean.parseBoolean(require("rev-parse", "--is-shallow-repository"));
-        // The raw tag name, not the parsed version, because only the raw name is a resolvable Git ref
-        String tagName = latestTagName();
-        SemanticVersion latestTag = tagName == null ? null : SemanticVersion.parse(tagName);
+        String releaseTagName = getParameters().getReleaseTag().get();
+        GitTag releaseTag = null;
+        if (!releaseTagName.isEmpty()) {
+            try {
+                releaseTag = GitTag.parse(releaseTagName);
+            } catch (IllegalArgumentException e) {
+                throw new GradleException("GitHub tag ref must be numeric SemVer in the form <major>.<minor>.<patch> or v<major>.<minor>.<patch>"
+                        + ", optionally followed by -alpha, -beta, -rc or -release (got '" + releaseTagName + "')", e);
+            }
+            CommandResult commit = git("rev-parse", "--verify", "refs/tags/" + releaseTagName + "^{commit}");
+            if (!commit.success() || !commit.output().equals(head.output())) {
+                throw new GradleException("GitHub tag '" + releaseTagName + "' must point to HEAD");
+            }
+        }
+        String tagName = releaseTag == null ? null : releaseTagName;
+        SemanticVersion latestTag = releaseTag == null ? null : releaseTag.version();
+        List<GitTag> staged = new ArrayList<>();
+
+        // Compare parsed numbers so a leading "v" cannot outrank a higher version.
+
+        for (String name : require("tag", "--merged", "HEAD").split("\\R")) {
+            GitTag tag;
+            try {
+                tag = GitTag.parse(name);
+            } catch (IllegalArgumentException e) {
+                continue;
+            }
+            SemanticVersion version = tag.version();
+            if (releaseTag != null && version.compareTo(releaseTag.version()) > 0) {
+                continue;
+            }
+            if (releaseTag == null && (latestTag == null || version.compareTo(latestTag) > 0
+                    || (version.equals(latestTag)
+                        && parseCount(require("rev-list", "--count", name + "..HEAD"))
+                        < parseCount(require("rev-list", "--count", tagName + "..HEAD"))))) {
+                latestTag = version;
+                tagName = name;
+            }
+            if (tag.stage() != null) {
+                staged.add(tag);
+            }
+        }
+        Stage stage = releaseTag == null ? null : releaseTag.stage();
+        if (stage == null) {
+            // Each major version starts over, so a new line never carries the last line's pre-release stage
+            SemanticVersion baseline = latestTag;
+            stage = staged.stream()
+                    .filter(tag -> tag.version().major() == baseline.major())
+                    .max(Comparator.comparing(GitTag::version).thenComparing(GitTag::stage))
+                    .map(GitTag::stage)
+                    .orElse(baseline == null || baseline.major() == 0 ? Stage.BETA : Stage.RELEASE);
+        }
         // The whole history rather than the distance from the tag
         long distance = tagName == null
                 ? parseCount(require("rev-list", "--count", "HEAD"))
@@ -61,27 +119,8 @@ public abstract class GitSnapshotValueSource implements ValueSource<GitSnapshot,
         boolean pushed = !git("for-each-ref", "--contains", "HEAD", "--count=1", "refs/remotes/").output().isEmpty();
 
         CommandResult branch = git("symbolic-ref", "--quiet", "--short", "HEAD");
-        return new GitSnapshot(latestTag, distance, dirty, pushed, shallow,
+        return new GitSnapshot(latestTag, stage, distance, dirty, pushed, shallow,
                 branch.success() ? branch.output() : "");
-    }
-
-    // Not git's own --sort=-v:refname: it compares refnames
-    // A leading "v" outranks a digit and v1.2.3 would beat
-    // 2.0.0 in a repository that mixes both tag forms
-    private String latestTagName() {
-        String name = null;
-        SemanticVersion highest = null;
-        for (String tag : require("tag", "--merged", "HEAD").split("\\R")) {
-            if (!SemanticVersion.isValid(tag)) {
-                continue;
-            }
-            SemanticVersion candidate = SemanticVersion.parse(tag);
-            if (highest == null || candidate.compareTo(highest) > 0) {
-                highest = candidate;
-                name = tag;
-            }
-        }
-        return name;
     }
 
     private String require(String... arguments) {

@@ -8,6 +8,8 @@ import org.gradle.testkit.runner.TaskOutcome;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.lang.reflect.Proxy;
@@ -16,6 +18,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -48,7 +51,6 @@ class CleanroomVersioningPluginTest {
     void setup() throws IOException {
         this.projectDir = Files.createDirectory(this.tempDir.resolve("project"));
         Files.writeString(this.projectDir.resolve("settings.gradle"), "rootProject.name = 'versioning-test'\n");
-        Files.writeString(this.projectDir.resolve("gradle.properties"), "versioning.stage = release\n");
         Files.writeString(this.projectDir.resolve(".gitignore"), ".gradle/\nbuild/\n");
         writeBuild("");
     }
@@ -452,7 +454,6 @@ class CleanroomVersioningPluginTest {
                 id 'maven-publish'
                 """, "");
         Files.writeString(this.projectDir.resolve("gradle.properties"), """
-                versioning.stage = release
                 versioning.label = nightly
                 versioning.developmentPrefix = next
                 """);
@@ -487,6 +488,89 @@ class CleanroomVersioningPluginTest {
         tag("1.3.0");
 
         assertVersion(run(githubTag("1.3.0"), "-q", "printVersion"), "1.3.0");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0.4.12", "v0.4.12"})
+    void githubTagBuildPublishesOlderVersionsWithTheirOwnStage(String name) throws Exception {
+        writeBuild(PRINT_STAGE);
+        initGit();
+        commit("newer line");
+        tag("0.5.0-alpha");
+        commit("older line");
+        tag("0.4.9-beta");
+        commit("releases");
+        git("tag", "-a", name, "-m", "maintenance release");
+        tag("0.5.1");
+        setRemoteBranch("master");
+
+        var older = run(githubTag(name), "--configuration-cache", "-q", "printVersion", "printStage");
+        assertVersion(older, "0.4.12");
+        assertStage(older, "beta");
+
+        var newer = run(githubTag("0.5.1"), "--configuration-cache", "-q", "printVersion", "printStage");
+        assertVersion(newer, "0.5.1");
+        assertStage(newer, "alpha");
+    }
+
+    @Test
+    void githubTagBuildIgnoresStagesAboveItsVersion() throws Exception {
+        writeBuild(PRINT_STAGE);
+        initGit();
+        commit("newer line");
+        tag("0.5.0-alpha");
+        commit("older release");
+        tag("0.4.12");
+
+        var result = run(githubTag("0.4.12"), "-q", "printVersion", "printStage");
+        assertVersion(result, "0.4.12");
+        assertStage(result, "beta");
+    }
+
+    @Test
+    void githubTagBuildRejectsAVersionAnotherTagPublished() throws Exception {
+        writeBuild(PRINT_STAGE);
+        initGit();
+        commit("alpha");
+        tag("0.5.0-alpha");
+        commit("release");
+        tag("0.5.0-release");
+
+        var duplicate = fail(githubTag("0.5.0-release"), "printVersion");
+        assertTrue(duplicate.getOutput().contains("which tag '0.5.0-alpha' already published"), duplicate.getOutput());
+
+        var result = run(githubTag("0.5.0-release"), "-Pversioning.replaceRelease=true", "-q", "printVersion", "printStage");
+        assertVersion(result, "0.5.0");
+        assertStage(result, "release");
+    }
+
+    @Test
+    void githubTagBuildUsesItsExplicitStage() throws Exception {
+        writeBuild(PRINT_STAGE);
+        initGit();
+        commit("release");
+        tag("0.4.0-release");
+        commit("alpha");
+        tag("0.5.0-alpha");
+
+        var result = run(githubTag("0.5.0-alpha"), "-q", "printVersion", "printStage");
+        assertVersion(result, "0.5.0");
+        assertStage(result, "alpha");
+    }
+
+    @Test
+    void githubTagBuildRequiresTheNamedTagAtHead() throws Exception {
+        initGit();
+        commit("initial");
+        tag("0.5.0-alpha");
+        commit("release");
+        tag("0.5.0");
+
+        var wrongCommit = fail(githubTag("0.5.0-alpha"), "printVersion");
+        assertTrue(wrongCommit.getOutput().contains("must point to HEAD"), wrongCommit.getOutput());
+
+        var missingTag = fail(githubTag("v0.5.0"), "printVersion");
+        assertTrue(missingTag.getOutput().contains("must point to HEAD"), missingTag.getOutput());
     }
 
     @Test
@@ -557,7 +641,7 @@ class CleanroomVersioningPluginTest {
     @Test
     void declaredProjectVersionFailsMigration() throws Exception {
         Files.writeString(this.projectDir.resolve("gradle.properties"),
-                "version = 1.2.3\nversioning.stage = release\n");
+                "version = 1.2.3\n");
         initGit();
         commit("initial");
 
@@ -578,15 +662,142 @@ class CleanroomVersioningPluginTest {
     @Test
     void stageDefaultsToBetaBelowFirstMajor() throws Exception {
         writeBuild(PRINT_STAGE);
-        Files.writeString(this.projectDir.resolve("gradle.properties"), "");
         initGit();
         commit("initial");
+        assertStage(run("-q", "printStage"), "beta");
+
         tag("0.9.0");
 
         assertStage(run("-q", "printStage"), "beta");
 
         tag("1.0.0");
         assertStage(run("-q", "printStage"), "release");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"alpha", "beta", "rc", "release", "ALPHA"})
+    void stageTagSetsTheNumericVersionAndStage(String stage) throws Exception {
+        writeBuild(PRINT_STAGE);
+        initGit();
+        commit("initial");
+        String name = "v0.4.2-" + stage;
+        git("tag", "-a", name, "-m", "stage");
+
+        var result = run(githubTag(name), "-q", "printVersion", "printStage");
+        assertVersion(result, "0.4.2");
+        assertStage(result, stage.toLowerCase(Locale.ROOT));
+    }
+
+    @Test
+    void stageIsInheritedAcrossBareTagsAndDevelopmentCommits() throws Exception {
+        writeBuild(PRINT_STAGE);
+        initGit();
+        commit("initial");
+        tag("0.4.2-alpha");
+        commit("next release");
+        tag("0.5.0");
+
+        var release = run(githubTag("0.5.0"), "-q", "printVersion", "printStage");
+        assertVersion(release, "0.5.0");
+        assertStage(release, "alpha");
+
+        commit("development");
+        var development = run("-q", "printVersion", "printStage");
+        assertVersion(development, "0.5.1-dev.1.local");
+        assertStage(development, "alpha");
+
+        tag("0.6.0-release");
+        commit("next release");
+        tag("0.7.0");
+        assertStage(run("-q", "printStage"), "release");
+    }
+
+    @Test
+    void stageInheritanceStartsOverAtEachMajorVersion() throws Exception {
+        writeBuild(PRINT_STAGE);
+        initGit();
+        commit("initial");
+        tag("0.4.2-alpha");
+        commit("first major");
+        tag("1.0.0");
+
+        assertStage(run(githubTag("1.0.0"), "-q", "printStage"), "release");
+
+        tag("1.5.0-rc");
+        commit("next major");
+        tag("2.0.0");
+        assertStage(run(githubTag("2.0.0"), "-q", "printStage"), "release");
+
+        commit("development");
+        assertStage(run("-q", "printStage"), "release");
+
+        tag("3.0.0-alpha");
+        commit("third major");
+        assertStage(run("-q", "printStage"), "alpha");
+    }
+
+    @Test
+    void stageComesFromTheHighestReachableVersionWithAStage() throws Exception {
+        writeBuild(PRINT_STAGE);
+        initGit();
+        commit("initial");
+        tag("v0.4.2-alpha");
+        commit("beta");
+        tag("0.5.0-beta");
+        commit("older hotfix");
+        tag("0.4.3-release");
+        git("switch", "-c", "other");
+        commit("unmerged release");
+        tag("2.0.0-release");
+        git("switch", "master");
+        tag("3.0.0-nightly");
+        tag("3.0.0-alpha.1");
+        tag("latest-alpha");
+
+        var result = run("-q", "printVersion", "printStage");
+        assertVersion(result, "0.5.1-dev.1.local");
+        assertStage(result, "beta");
+    }
+
+    @Test
+    void stageAdvancesWithinTheSameNumericVersion() throws Exception {
+        writeBuild(PRINT_STAGE);
+        initGit();
+        commit("initial");
+        tag("0.5.0-alpha");
+        commit("beta");
+        tag("0.5.0-beta");
+
+        var result = run(githubTag("0.5.0-beta"), "-Pversioning.replaceRelease=true", "-q", "printVersion", "printStage");
+        assertVersion(result, "0.5.0");
+        assertStage(result, "beta");
+    }
+
+    @Test
+    void configurationCacheTracksStageTagChanges() throws Exception {
+        writeBuild(PRINT_STAGE);
+        initGit();
+        commit("initial");
+        tag("0.5.0");
+
+        assertStage(run("--configuration-cache", "-q", "printStage"), "beta");
+        tag("0.4.2-alpha");
+        assertStage(run("--configuration-cache", "-q", "printStage"), "alpha");
+        git("tag", "-d", "0.4.2-alpha");
+        assertStage(run("--configuration-cache", "-q", "printStage"), "beta");
+    }
+
+    @Test
+    void stagePropertyOverridesGitStageWithADeprecationWarning() throws Exception {
+        writeBuild(PRINT_STAGE);
+        Files.writeString(this.projectDir.resolve("gradle.properties"), "versioning.stage = release\n");
+        initGit();
+        commit("initial");
+        tag("0.4.2-alpha");
+
+        var result = run("printStage");
+        assertStage(result, "release");
+        assertTrue(result.getOutput().contains("Setting versioning.stage from Gradle is deprecated"), result.getOutput());
     }
 
     @Test
@@ -598,8 +809,11 @@ class CleanroomVersioningPluginTest {
                 """);
         initGit();
         commit("initial");
+        tag("0.4.2-beta");
 
-        assertStage(run("-q", "printStage"), "alpha");
+        var result = run("printStage");
+        assertStage(result, "alpha");
+        assertTrue(result.getOutput().contains("Setting versioning.stage from Gradle is deprecated"), result.getOutput());
     }
 
     // The property is typed, so a consumer can switch on the value rather than compare strings.
